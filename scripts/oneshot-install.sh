@@ -176,11 +176,6 @@ Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-ProtectSystem=strict
-ReadWritePaths=/var/log/clawav /var/run/clawav /etc/clawav
-ProtectHome=read-only
-NoNewPrivileges=false
-CapabilityBoundingSet=CAP_AUDIT_READ CAP_NET_ADMIN CAP_DAC_READ_SEARCH
 
 [Install]
 WantedBy=multi-user.target
