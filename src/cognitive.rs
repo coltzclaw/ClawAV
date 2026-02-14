@@ -5,16 +5,19 @@ use std::path::{Path, PathBuf};
 
 use crate::scanner::{ScanResult, ScanStatus};
 
-/// Cognitive files that control agent behavior
-/// NOTE: MEMORY.md excluded — it changes frequently (agent's working memory).
-/// We protect identity/behavior files, not mutable state.
-const COGNITIVE_FILES: &[&str] = &[
+/// Protected cognitive files — changes are CRIT (tampering)
+const PROTECTED_FILES: &[&str] = &[
     "SOUL.md",
     "IDENTITY.md", 
     "TOOLS.md",
     "AGENTS.md",
     "USER.md",
     "HEARTBEAT.md",
+];
+
+/// Watched cognitive files — changes are INFO with diff, auto-rebaselined
+const WATCHED_FILES: &[&str] = &[
+    "MEMORY.md",
 ];
 
 /// Stores SHA-256 baselines for cognitive files
@@ -27,7 +30,7 @@ impl CognitiveBaseline {
     /// Create baselines from current state of files
     pub fn from_workspace(workspace_dir: &Path) -> Self {
         let mut baselines = HashMap::new();
-        for filename in COGNITIVE_FILES {
+        for filename in PROTECTED_FILES.iter().chain(WATCHED_FILES.iter()) {
             let path = workspace_dir.join(filename);
             if path.exists() {
                 if let Ok(hash) = compute_sha256(&path) {
@@ -75,31 +78,49 @@ impl CognitiveBaseline {
     /// Check all cognitive files against baselines
     pub fn check(&self) -> Vec<CognitiveAlert> {
         let mut alerts = Vec::new();
+        let all_files: Vec<&str> = PROTECTED_FILES.iter().chain(WATCHED_FILES.iter()).copied().collect();
 
         // Check for modified or deleted files
         for (path, expected_hash) in &self.baselines {
+            // Skip files no longer in our lists (stale baseline entries)
+            let filename = path.file_name().unwrap_or_default().to_string_lossy();
+            if !all_files.iter().any(|&f| f == filename.as_ref()) {
+                continue;
+            }
+
+            let is_watched = WATCHED_FILES.iter().any(|&f| f == filename.as_ref());
+
             if !path.exists() {
                 alerts.push(CognitiveAlert {
                     file: path.clone(),
                     kind: CognitiveAlertKind::Deleted,
+                    watched: is_watched,
                 });
             } else if let Ok(current_hash) = compute_sha256(path) {
                 if &current_hash != expected_hash {
+                    let diff = if is_watched {
+                        generate_diff(path, &self.workspace_dir)
+                    } else {
+                        None
+                    };
                     alerts.push(CognitiveAlert {
                         file: path.clone(),
-                        kind: CognitiveAlertKind::Modified,
+                        kind: CognitiveAlertKind::Modified { diff },
+                        watched: is_watched,
                     });
                 }
             }
         }
 
-        // Check for new cognitive files that weren't in baseline
-        for filename in COGNITIVE_FILES {
+        // Check for new files that weren't in baseline
+        for filename in &all_files {
             let path = self.workspace_dir.join(filename);
             if path.exists() && !self.baselines.contains_key(&path) {
+                let is_watched = WATCHED_FILES.contains(filename);
                 alerts.push(CognitiveAlert {
                     file: path,
                     kind: CognitiveAlertKind::NewFile,
+                    watched: is_watched,
                 });
             }
         }
@@ -107,11 +128,20 @@ impl CognitiveBaseline {
         alerts
     }
 
+    /// Update baseline for a single file
+    pub fn update_file(&mut self, path: &Path) {
+        if path.exists() {
+            if let Ok(hash) = compute_sha256(path) {
+                self.baselines.insert(path.to_path_buf(), hash);
+            }
+        }
+    }
+
     /// Update baselines to current state
     #[allow(dead_code)]
     pub fn rebaseline(&mut self) {
         self.baselines.clear();
-        for filename in COGNITIVE_FILES {
+        for filename in PROTECTED_FILES.iter().chain(WATCHED_FILES.iter()) {
             let path = self.workspace_dir.join(filename);
             if path.exists() {
                 if let Ok(hash) = compute_sha256(&path) {
@@ -126,11 +156,13 @@ impl CognitiveBaseline {
 pub struct CognitiveAlert {
     pub file: PathBuf,
     pub kind: CognitiveAlertKind,
+    /// If true, this is a watched (mutable) file — report as info, not critical
+    pub watched: bool,
 }
 
 #[derive(Debug, Clone)]
 pub enum CognitiveAlertKind {
-    Modified,
+    Modified { diff: Option<String> },
     Deleted,
     NewFile,
 }
@@ -138,8 +170,13 @@ pub enum CognitiveAlertKind {
 impl std::fmt::Display for CognitiveAlert {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let filename = self.file.file_name().unwrap_or_default().to_string_lossy();
-        match self.kind {
-            CognitiveAlertKind::Modified => write!(f, "{} has been modified", filename),
+        match &self.kind {
+            CognitiveAlertKind::Modified { diff: Some(d) } => {
+                write!(f, "{} updated:\n{}", filename, d)
+            }
+            CognitiveAlertKind::Modified { diff: None } => {
+                write!(f, "{} has been modified", filename)
+            }
             CognitiveAlertKind::Deleted => write!(f, "{} has been deleted", filename),
             CognitiveAlertKind::NewFile => write!(f, "{} is new (no baseline)", filename),
         }
@@ -152,36 +189,144 @@ fn compute_sha256(path: &Path) -> Result<String> {
     Ok(hex::encode(hash))
 }
 
+/// Shadow directory for storing previous versions of watched files
+const SHADOW_DIR: &str = "/etc/clawav/cognitive-shadow";
+
+/// Generate a unified diff between the shadow (previous) and current version
+fn generate_diff(current_path: &Path, _workspace_dir: &Path) -> Option<String> {
+    let filename = current_path.file_name()?.to_string_lossy();
+    let shadow_path = PathBuf::from(SHADOW_DIR).join(filename.as_ref());
+
+    let current = std::fs::read_to_string(current_path).ok()?;
+
+    if !shadow_path.exists() {
+        // No previous version — show summary
+        let lines: Vec<&str> = current.lines().collect();
+        return Some(format!("(new file, {} lines)", lines.len()));
+    }
+
+    let previous = std::fs::read_to_string(&shadow_path).ok()?;
+    if previous == current {
+        return None;
+    }
+
+    // Simple line-based diff
+    let old_lines: Vec<&str> = previous.lines().collect();
+    let new_lines: Vec<&str> = current.lines().collect();
+
+    let mut diff_lines = Vec::new();
+    let mut added = 0;
+    let mut removed = 0;
+
+    // Find removed lines (in old but not in new)
+    for line in &old_lines {
+        if !new_lines.contains(line) {
+            removed += 1;
+            if diff_lines.len() < 15 {
+                diff_lines.push(format!("- {}", line));
+            }
+        }
+    }
+
+    // Find added lines (in new but not in old)
+    for line in &new_lines {
+        if !old_lines.contains(line) {
+            added += 1;
+            if diff_lines.len() < 15 {
+                diff_lines.push(format!("+ {}", line));
+            }
+        }
+    }
+
+    let total_changes = added + removed;
+    if total_changes == 0 {
+        return None;
+    }
+
+    let mut result = format!("+{} -{} lines", added, removed);
+    if !diff_lines.is_empty() {
+        result.push('\n');
+        result.push_str(&diff_lines.join("\n"));
+        if total_changes > 15 {
+            result.push_str(&format!("\n... and {} more changes", total_changes - diff_lines.len()));
+        }
+    }
+
+    Some(result)
+}
+
+/// Save current version to shadow directory for future diffs
+fn save_shadow(path: &Path) {
+    if let Some(filename) = path.file_name() {
+        let shadow_dir = Path::new(SHADOW_DIR);
+        let _ = std::fs::create_dir_all(shadow_dir);
+        let shadow_path = shadow_dir.join(filename);
+        let _ = std::fs::copy(path, shadow_path);
+    }
+}
+
 /// Scanner integration: check cognitive file integrity
-pub fn scan_cognitive_integrity(workspace_dir: &Path, baseline_path: &Path) -> ScanResult {
-    // If no baseline exists yet, create one
+pub fn scan_cognitive_integrity(workspace_dir: &Path, baseline_path: &Path) -> Vec<ScanResult> {
+    // If no baseline exists yet, create one and save shadows
     if !baseline_path.exists() {
         let baseline = CognitiveBaseline::from_workspace(workspace_dir);
         if baseline.baselines.is_empty() {
-            return ScanResult::new("cognitive", ScanStatus::Warn, "No cognitive files found in workspace");
+            return vec![ScanResult::new("cognitive", ScanStatus::Warn, "No cognitive files found in workspace")];
+        }
+        // Save shadows for watched files
+        for filename in WATCHED_FILES {
+            let path = workspace_dir.join(filename);
+            if path.exists() {
+                save_shadow(&path);
+            }
         }
         match baseline.save(baseline_path) {
-            Ok(_) => return ScanResult::new("cognitive", ScanStatus::Pass, 
-                &format!("Created baselines for {} cognitive files", baseline.baselines.len())),
-            Err(e) => return ScanResult::new("cognitive", ScanStatus::Warn, 
-                &format!("Cannot save baselines: {}", e)),
+            Ok(_) => return vec![ScanResult::new("cognitive", ScanStatus::Pass, 
+                &format!("Created baselines for {} cognitive files", baseline.baselines.len()))],
+            Err(e) => return vec![ScanResult::new("cognitive", ScanStatus::Warn, 
+                &format!("Cannot save baselines: {}", e))],
         }
     }
 
     // Load and check
     match CognitiveBaseline::load(baseline_path, workspace_dir) {
-        Ok(baseline) => {
+        Ok(mut baseline) => {
             let alerts = baseline.check();
             if alerts.is_empty() {
-                ScanResult::new("cognitive", ScanStatus::Pass, "All cognitive files intact")
-            } else {
-                let details: Vec<String> = alerts.iter().map(|a| a.to_string()).collect();
-                ScanResult::new("cognitive", ScanStatus::Fail, 
-                    &format!("TAMPERING DETECTED: {}", details.join("; ")))
+                return vec![ScanResult::new("cognitive", ScanStatus::Pass, "All cognitive files intact")];
             }
+
+            let mut results = Vec::new();
+            let mut has_protected_alerts = false;
+            let mut protected_details = Vec::new();
+
+            for alert in &alerts {
+                if alert.watched {
+                    // Watched file changed — INFO level, include diff, auto-rebaseline
+                    results.push(ScanResult::new("cognitive", ScanStatus::Warn,
+                        &format!("📝 {}", alert)));
+                    // Update baseline and shadow for this file
+                    baseline.update_file(&alert.file);
+                    save_shadow(&alert.file);
+                } else {
+                    // Protected file changed — CRIT
+                    has_protected_alerts = true;
+                    protected_details.push(alert.to_string());
+                }
+            }
+
+            if has_protected_alerts {
+                results.push(ScanResult::new("cognitive", ScanStatus::Fail,
+                    &format!("TAMPERING DETECTED: {}", protected_details.join("; "))));
+            }
+
+            // Save updated baselines for watched files
+            let _ = baseline.save(baseline_path);
+
+            results
         }
-        Err(e) => ScanResult::new("cognitive", ScanStatus::Warn, 
-            &format!("Cannot load baselines: {}", e)),
+        Err(e) => vec![ScanResult::new("cognitive", ScanStatus::Warn, 
+            &format!("Cannot load baselines: {}", e))],
     }
 }
 
@@ -202,6 +347,16 @@ mod tests {
     }
 
     #[test]
+    fn test_baseline_includes_watched() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("SOUL.md"), "I am an agent").unwrap();
+        fs::write(dir.path().join("MEMORY.md"), "memories").unwrap();
+
+        let baseline = CognitiveBaseline::from_workspace(dir.path());
+        assert_eq!(baseline.baselines.len(), 2);
+    }
+
+    #[test]
     fn test_detect_modification() {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("SOUL.md"), "I am an agent").unwrap();
@@ -213,7 +368,23 @@ mod tests {
 
         let alerts = baseline.check();
         assert_eq!(alerts.len(), 1);
-        assert!(matches!(alerts[0].kind, CognitiveAlertKind::Modified));
+        assert!(matches!(alerts[0].kind, CognitiveAlertKind::Modified { .. }));
+        assert!(!alerts[0].watched);
+    }
+
+    #[test]
+    fn test_watched_file_modification() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("MEMORY.md"), "old memories").unwrap();
+
+        let baseline = CognitiveBaseline::from_workspace(dir.path());
+
+        fs::write(dir.path().join("MEMORY.md"), "new memories").unwrap();
+
+        let alerts = baseline.check();
+        assert_eq!(alerts.len(), 1);
+        assert!(matches!(alerts[0].kind, CognitiveAlertKind::Modified { .. }));
+        assert!(alerts[0].watched);
     }
 
     #[test]

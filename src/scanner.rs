@@ -1349,10 +1349,6 @@ impl SecurityScanner {
             scan_immutable_flags(),
             scan_apparmor_protection(),
             scan_secureclaw_sync(),
-            scan_cognitive_integrity(
-                std::path::Path::new("/home/openclaw/.openclaw/workspace"),
-                std::path::Path::new("/etc/clawav/cognitive-baselines.sha256"),
-            ),
             crate::logtamper::scan_audit_log_health(std::path::Path::new("/var/log/audit/audit.log")),
             // New expanded security checks
             scan_crontab_audit(),
@@ -1374,6 +1370,11 @@ impl SecurityScanner {
             scan_systemd_hardening(),
             scan_user_account_audit(),
         ];
+        // Cognitive file integrity (returns Vec)
+        results.extend(scan_cognitive_integrity(
+            std::path::Path::new("/home/openclaw/.openclaw/workspace"),
+            std::path::Path::new("/etc/clawav/cognitive-baselines.sha256"),
+        ));
         // OpenClaw-specific security checks
         results.extend(scan_openclaw_security());
         results
