@@ -1371,9 +1371,14 @@ impl SecurityScanner {
             scan_user_account_audit(),
         ];
         // Cognitive file integrity (returns Vec)
+        // Load SecureClaw engine for cognitive content scanning
+        let secureclaw_engine = crate::secureclaw::SecureClawEngine::load(
+            std::path::Path::new("/etc/clawav/secureclaw")
+        ).ok();
         results.extend(scan_cognitive_integrity(
             std::path::Path::new("/home/openclaw/.openclaw/workspace"),
             std::path::Path::new("/etc/clawav/cognitive-baselines.sha256"),
+            secureclaw_engine.as_ref(),
         ));
         // OpenClaw-specific security checks
         results.extend(scan_openclaw_security());

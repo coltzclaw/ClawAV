@@ -583,6 +583,19 @@ impl SecureClawEngine {
                     continue;
                 }
 
+                // Skip crontab mentions in grep/ps/search commands (not actual crontab invocations)
+                if matched.as_str().contains("crontab") {
+                    let cmd_lower_trimmed = cmd_lower.trim();
+                    if cmd_lower_trimmed.starts_with("grep ")
+                        || cmd_lower_trimmed.starts_with("egrep ")
+                        || cmd_lower_trimmed.starts_with("ps ")
+                        || cmd_lower.contains("| grep")
+                        || cmd_lower.contains("|grep")
+                    {
+                        continue;
+                    }
+                }
+
                 matches.push(PatternMatch {
                     database: "dangerous_commands".to_string(),
                     category: pattern.category.clone(),
@@ -729,5 +742,37 @@ mod tests {
         assert!(engine.dangerous_commands.is_empty());
         assert!(engine.privacy_rules.is_empty());
         assert!(engine.supply_chain_iocs.is_empty());
+    }
+
+    #[test]
+    fn test_crontab_grep_not_flagged() {
+        let temp_dir = create_test_patterns_dir();
+        // Add crontab pattern to test data
+        let commands_content = r#"{
+            "version": "2.0.0",
+            "categories": {
+                "config_modification": {
+                    "severity": "high",
+                    "action": "require_approval",
+                    "patterns": ["crontab"]
+                },
+                "test_dangerous": {
+                    "severity": "critical",
+                    "action": "block",
+                    "patterns": ["rm.*-rf"]
+                }
+            }
+        }"#;
+        std::fs::write(temp_dir.path().join("dangerous-commands.json"), commands_content).unwrap();
+        let engine = SecureClawEngine::load(temp_dir.path()).unwrap();
+        
+        // These should NOT trigger
+        assert!(engine.check_command("grep crontab\\|for u").is_empty(), "grep mentioning crontab should not flag");
+        assert!(engine.check_command("ps auxww | grep crontab").is_empty(), "ps grep crontab should not flag");
+        assert!(engine.check_command("/bin/bash -c ps auxww | grep \"crontab\\|for u\" | grep -v grep").is_empty());
+        
+        // These SHOULD trigger
+        assert!(!engine.check_command("crontab -e").is_empty(), "crontab -e should flag");
+        assert!(!engine.check_command("crontab -r").is_empty(), "crontab -r should flag");
     }
 }

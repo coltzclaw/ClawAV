@@ -387,7 +387,13 @@ pub fn classify_behavior(event: &ParsedEvent) -> Option<(BehaviorCategory, Sever
                 if cmd.contains(pattern) {
                     // Don't flag our own legitimate preload operations
                     if !cmd.contains("clawav") && !cmd.contains("clawguard") {
-                        return Some((BehaviorCategory::SecurityTamper, Severity::Critical));
+                        // Don't flag normal compiler/linker invocations
+                        if ["ld", "collect2", "cc1", "cc1plus", "gcc", "g++", "rustc", "cc"].contains(&binary) {
+                            // Normal compilation — linker uses -dynamic-linker /lib/ld-linux-*.so.1
+                            // This is not an LD_PRELOAD bypass
+                        } else {
+                            return Some((BehaviorCategory::SecurityTamper, Severity::Critical));
+                        }
                     }
                 }
             }
@@ -1299,6 +1305,22 @@ mod tests {
         let event = make_exec_event(&["musl-gcc", "-o", "static-binary", "evil.c"]);
         let result = classify_behavior(&event);
         assert_eq!(result, Some((BehaviorCategory::SecurityTamper, Severity::Warning)));
+    }
+
+    #[test]
+    fn test_linker_not_flagged_as_tamper() {
+        let event = make_exec_event(&["/usr/bin/ld", "-plugin", "/usr/libexec/gcc/aarch64-linux-gnu/14/liblto_plugin.so", "-dynamic-linker", "/lib/ld-linux-aarch64.so.1", "-o", "output"]);
+        let result = classify_behavior(&event);
+        assert!(result.is_none() || result.unwrap().0 != BehaviorCategory::SecurityTamper, 
+            "Normal linker invocation should not be flagged as SEC_TAMPER");
+    }
+
+    #[test]
+    fn test_collect2_not_flagged_as_tamper() {
+        let event = make_exec_event(&["/usr/libexec/gcc/aarch64-linux-gnu/14/collect2", "-plugin", "liblto_plugin.so", "-dynamic-linker", "/lib/ld-linux-aarch64.so.1", "-o", "output"]);
+        let result = classify_behavior(&event);
+        assert!(result.is_none() || result.unwrap().0 != BehaviorCategory::SecurityTamper,
+            "collect2 should not be flagged as SEC_TAMPER");
     }
 }
 
