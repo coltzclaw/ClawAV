@@ -486,13 +486,45 @@ echo ""
 AGENT_USERNAME=$(getent passwd "$WATCH_UID" | cut -d: -f1 || echo "")
 ADMIN_USERNAME=""
 
-echo -en "  ${CYAN}Create a human admin account? [Y/n]: ${NC}" > /dev/tty
-read -r create_admin < /dev/tty
+# Check for existing admin accounts (sudo/admin group members that aren't the agent or root)
+EXISTING_ADMINS=()
+while IFS= read -r user; do
+    [[ "$user" == "$AGENT_USERNAME" ]] && continue
+    [[ "$user" == "root" ]] && continue
+    EXISTING_ADMINS+=("$user")
+done < <(getent group sudo 2>/dev/null | cut -d: -f4 | tr ',' '\n'; getent group admin 2>/dev/null | cut -d: -f4 | tr ',' '\n')
+# Also check for clawav-created admin sudoers files
+for f in /etc/sudoers.d/*; do
+    [[ -f "$f" ]] || continue
+    if grep -q "ClawAV.*Human admin" "$f" 2>/dev/null; then
+        admin_from_file=$(grep -oP '^\w+' "$f" | head -1)
+        [[ -n "$admin_from_file" && "$admin_from_file" != "$AGENT_USERNAME" ]] && EXISTING_ADMINS+=("$admin_from_file")
+    fi
+done
+# Deduplicate
+EXISTING_ADMINS=($(printf '%s\n' "${EXISTING_ADMINS[@]}" | sort -u))
 
-if [[ "$create_admin" =~ ^[nN] ]]; then
+if [[ ${#EXISTING_ADMINS[@]} -gt 0 ]]; then
+    echo -e "  ${GREEN}✓ Found existing admin account(s): ${BOLD}${EXISTING_ADMINS[*]}${NC}"
     echo ""
-    warn "Skipping admin account creation."
-    warn "Make sure you have another account with sudo access!"
+    echo -en "  ${CYAN}Use existing admin account(s)? [Y/n]: ${NC}" > /dev/tty
+    read -r use_existing < /dev/tty
+    if [[ ! "$use_existing" =~ ^[nN] ]]; then
+        log "Using existing admin account(s): ${EXISTING_ADMINS[*]}"
+        ADMIN_USERNAME="${EXISTING_ADMINS[0]}"
+        create_admin="n"
+    else
+        echo -en "  ${CYAN}Create an additional admin account? [Y/n]: ${NC}" > /dev/tty
+        read -r create_admin < /dev/tty
+    fi
+else
+    echo -en "  ${CYAN}Create a human admin account? [Y/n]: ${NC}" > /dev/tty
+    read -r create_admin < /dev/tty
+fi
+
+if [[ "$create_admin" =~ ^[nN] && ${#EXISTING_ADMINS[@]} -eq 0 ]]; then
+    echo ""
+    warn "No admin account found and none being created."
     echo -en "  ${CYAN}Do you already have a separate admin account? [y/N]: ${NC}" > /dev/tty
     read -r has_admin < /dev/tty
     if [[ ! "$has_admin" =~ ^[yY] ]]; then
