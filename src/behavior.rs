@@ -95,7 +95,10 @@ const SECURITY_TAMPER_PATTERNS: &[&str] = &[
 ];
 
 /// Recon commands
-const RECON_COMMANDS: &[&str] = &["whoami", "id", "uname", "env", "printenv", "hostname", "ifconfig", "ip addr"];
+const RECON_COMMANDS: &[&str] = &["whoami", "id", "uname", "env", "printenv", "hostname", "ifconfig"];
+
+/// Commands that look like recon but are normal system operations — skip detection
+const RECON_ALLOWLIST: &[&str] = &["ip neigh", "ip addr", "ip route", "ip link"];
 
 /// Side-channel attack tools
 const SIDECHANNEL_TOOLS: &[&str] = &["mastik", "flush-reload", "prime-probe", "sgx-step", "cache-attack"];
@@ -298,7 +301,10 @@ pub fn classify_behavior(event: &ParsedEvent) -> Option<(BehaviorCategory, Sever
         }
 
         // --- WARNING: Reconnaissance commands ---
-        if RECON_COMMANDS.iter().any(|&c| {
+        // Skip if the full command matches our allowlist of normal operations
+        let full_cmd_lower = args.join(" ").to_lowercase();
+        let is_allowed = RECON_ALLOWLIST.iter().any(|&a| full_cmd_lower.contains(a));
+        if !is_allowed && RECON_COMMANDS.iter().any(|&c| {
             let c_base = c.split_whitespace().next().unwrap_or(c);
             binary.eq_ignore_ascii_case(c_base)
         }) {

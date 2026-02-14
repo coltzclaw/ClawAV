@@ -1,54 +1,85 @@
+# ClawAV Default Detection Policies
+#
+# Philosophy: Flag genuinely suspicious behavior, not normal operations.
+# The agent (Claw/OpenClaw) runs commands via bash -c — that's normal.
+# What's NOT normal: reverse shells, encoded payloads to unknown hosts,
+# credential theft, security tool tampering, privilege escalation.
+
 rules:
+  # ── Data Exfiltration ──────────────────────────────────────────────────────
   - name: "block-data-exfiltration"
-    description: "Block curl/wget/nc to unknown hosts"
+    description: "Flag curl/wget to unknown hosts (allowlist our services)"
     match:
       command: ["curl", "wget", "nc", "ncat", "netcat", "socat"]
-      exclude_args: ["api.anthropic.com", "api.openai.com", "github.com"]
+      exclude_args:
+        # Our services
+        - "gottamolt.gg"
+        - "mahamedia.us"
+        - "localhost"
+        - "127.0.0.1"
+        # APIs we legitimately use
+        - "api.anthropic.com"
+        - "api.openai.com"
+        - "github.com"
+        - "raw.githubusercontent.com"
+        - "api.brave.com"
+        - "hooks.slack.com"
+        # AWS
+        - "amazonaws.com"
+        - "169.254.169.254"
+        # Package managers
+        - "registry.npmjs.org"
+        - "crates.io"
+        - "pypi.org"
     action: critical
 
+  # ── Reverse Shell Detection ────────────────────────────────────────────────
+  - name: "detect-reverse-shell"
+    description: "Detect reverse shell patterns"
+    match:
+      command_contains:
+        - "/dev/tcp/"
+        - "/dev/udp/"
+        - "mkfifo"
+        - "bash -i"
+        - "sh -i"
+        - "python -c 'import socket"
+        - "python3 -c 'import socket"
+        - "perl -e 'use Socket"
+        - "ruby -rsocket"
+        - "nc -e"
+        - "ncat -e"
+    action: critical
+
+  # ── Encoded/Obfuscated Commands ────────────────────────────────────────────
+  - name: "detect-encoded-commands"
+    description: "Flag base64-encoded or heavily obfuscated command execution"
+    match:
+      command_contains:
+        - "base64 -d |"
+        - "base64 --decode |"
+        - "| base64 -d"
+        - "| base64 --decode"
+        - "eval $(echo"
+        - "echo -e '\\x"
+        - "python -c 'exec("
+        - "python3 -c 'exec("
+    action: critical
+
+  # ── Credential Theft ───────────────────────────────────────────────────────
   - name: "deny-shadow-read"
     description: "Alert on sensitive credential file access"
     match:
-      file_access: ["/etc/shadow", "/etc/gshadow", "/etc/master.passwd", "/etc/sudoers", "/etc/sudoers.d/*"]
+      file_access:
+        - "/etc/shadow"
+        - "/etc/gshadow"
+        - "/etc/master.passwd"
+        - "/etc/sudoers"
+        - "/etc/sudoers.d/*"
     action: critical
-
-  - name: "deny-sensitive-write"
-    description: "Alert on writes to critical system files"
-    match:
-      file_access: ["/etc/passwd", "/etc/hosts", "/etc/crontab", "/etc/shadow"]
-    action: critical
-
-  - name: "deny-firewall-changes"
-    description: "Alert on firewall/security modifications"
-    match:
-      command_contains:
-        - "ufw disable"
-        - "iptables -F"
-        - "iptables --flush"
-        - "iptables -f"
-        - "nft flush"
-        - "systemctl stop apparmor"
-        - "systemctl disable apparmor"
-        - "systemctl stop auditd"
-        - "systemctl disable auditd"
-        - "systemctl stop openclawav"
-        - "systemctl disable openclawav"
-        - "systemctl stop samhain"
-        - "systemctl disable samhain"
-        - "systemctl stop fail2ban"
-        - "systemctl disable fail2ban"
-        - "aa-teardown"
-        - "setenforce 0"
-    action: critical
-
-  - name: "recon-detection"
-    description: "Flag reconnaissance commands"
-    match:
-      command: ["whoami", "id", "uname", "env", "printenv", "hostname", "ifconfig"]
-    action: warning
 
   - name: "recon-sensitive-files"
-    description: "Flag access to credential/config files"
+    description: "Flag access to credential/secret files"
     match:
       file_access:
         - "**/.env"
@@ -60,3 +91,114 @@ rules:
         - "**/.gnupg/**"
         - "**/.kube/config"
     action: warning
+
+  # ── System Tampering ───────────────────────────────────────────────────────
+  - name: "deny-sensitive-write"
+    description: "Alert on writes to critical system files"
+    match:
+      file_access:
+        - "/etc/passwd"
+        - "/etc/hosts"
+        - "/etc/crontab"
+        - "/etc/shadow"
+    action: critical
+
+  - name: "deny-firewall-changes"
+    description: "Alert on firewall/security modifications"
+    match:
+      command_contains:
+        - "ufw disable"
+        - "iptables -F"
+        - "iptables --flush"
+        - "nft flush"
+        - "setenforce 0"
+        - "aa-teardown"
+    action: critical
+
+  - name: "deny-security-service-disable"
+    description: "Alert on disabling security services"
+    match:
+      command_contains:
+        - "systemctl stop clawav"
+        - "systemctl disable clawav"
+        - "systemctl stop apparmor"
+        - "systemctl disable apparmor"
+        - "systemctl stop auditd"
+        - "systemctl disable auditd"
+        - "systemctl stop fail2ban"
+        - "systemctl disable fail2ban"
+    action: critical
+
+  # ── ClawAV Tamper Detection ────────────────────────────────────────────────
+  - name: "deny-clawav-tamper"
+    description: "Detect attempts to modify ClawAV itself"
+    match:
+      command_contains:
+        - "chattr -i"
+        - "chattr -a"
+        - "auditctl -D"
+        - "auditctl -e 0"
+        - "apparmor_parser -R"
+        - "systemctl mask clawav"
+        - "rm /usr/local/bin/clawav"
+        - "rm /usr/local/bin/clawsudo"
+        - "rm -rf /etc/clawav"
+    action: critical
+
+  - name: "deny-clawav-config-write"
+    description: "Detect writes to ClawAV config files"
+    match:
+      file_access:
+        - "/etc/clawav/config.toml"
+        - "/etc/clawav/policies/*"
+    action: critical
+
+  # ── Privilege Escalation ───────────────────────────────────────────────────
+  - name: "detect-priv-escalation"
+    description: "Flag privilege escalation attempts"
+    match:
+      command_contains:
+        - "chmod u+s"
+        - "chmod 4755"
+        - "chmod 4777"
+        - "setcap cap_"
+        - "visudo"
+        - "usermod -aG sudo"
+        - "usermod -aG wheel"
+    action: critical
+
+  # ── Crypto / Miners ────────────────────────────────────────────────────────
+  - name: "detect-crypto-miner"
+    description: "Flag potential cryptocurrency mining"
+    match:
+      command_contains:
+        - "xmrig"
+        - "minerd"
+        - "cpuminer"
+        - "stratum+tcp"
+        - "nicehash"
+        - "cryptonight"
+    action: critical
+
+  # ── Recon (informational only) ─────────────────────────────────────────────
+  - name: "recon-network"
+    description: "Flag network reconnaissance tools"
+    match:
+      command: ["nmap", "masscan", "nikto", "sqlmap", "dirb", "gobuster"]
+    action: warning
+
+  # ── Dangerous Destructive Commands ─────────────────────────────────────────
+  - name: "deny-dangerous-rm"
+    description: "Flag dangerous recursive deletions"
+    match:
+      command_contains:
+        - "rm -rf /"
+        - "rm -rf /etc"
+        - "rm -rf /usr"
+        - "rm -rf /var"
+        - "rm -rf /home"
+        - "rm -rf /boot"
+        - "dd if=/dev/zero of=/dev"
+        - "mkfs."
+        - "> /dev/sda"
+    action: critical

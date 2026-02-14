@@ -1,7 +1,17 @@
+# ClawAV clawsudo Enforcement Policies
+#
+# These policies are enforced by clawsudo (the sudo proxy).
+# Unlike default.yaml (detection-only), these BLOCK commands.
+#
+# enforcement: allow  → permit the command
+# enforcement: deny   → block the command
+# (no enforcement)    → detect only, don't block
+
 rules:
+  # ── Allowed Commands ───────────────────────────────────────────────────────
   - name: "allow-apt"
     match:
-      command: ["apt", "apt-get"]
+      command: ["apt", "apt-get", "dpkg"]
     action: info
     enforcement: allow
 
@@ -11,32 +21,93 @@ rules:
     action: info
     enforcement: allow
 
-  - name: "allow-systemctl-openclaw"
+  - name: "allow-systemctl"
+    description: "Allow service management"
     match:
-      command_contains: ["systemctl restart openclaw", "systemctl status"]
+      command: ["systemctl"]
     action: info
     enforcement: allow
 
-  - name: "deny-openclawav-tamper"
+  - name: "allow-journalctl"
     match:
-      command_contains: ["openclawav", "/etc/openclawav", "chattr", "auditctl -e", "auditctl -D", "apparmor_parser -R"]
+      command: ["journalctl"]
+    action: info
+    enforcement: allow
+
+  - name: "allow-ufw"
+    match:
+      command: ["ufw"]
+    action: info
+    enforcement: allow
+
+  - name: "allow-file-ops"
+    description: "Allow common file operations via sudo"
+    match:
+      command: ["cp", "mv", "mkdir", "chown", "chmod", "rm", "tee", "sed", "cat"]
+    action: info
+    enforcement: allow
+
+  - name: "allow-ip"
+    match:
+      command: ["ip"]
+    action: info
+    enforcement: allow
+
+  # ── Denied Commands ────────────────────────────────────────────────────────
+  - name: "deny-clawav-tamper"
+    description: "Block modifications to ClawAV config and binaries"
+    match:
+      command_contains:
+        - "/etc/clawav"
+        - "/usr/local/bin/clawav"
+        - "/usr/local/bin/clawsudo"
+        - "chattr"
+        - "auditctl -D"
+        - "auditctl -e 0"
+        - "apparmor_parser -R"
     action: critical
     enforcement: deny
 
   - name: "deny-firewall-disable"
     match:
-      command_contains: ["ufw disable", "iptables -F", "nft flush"]
-    action: critical
-    enforcement: deny
-
-  - name: "deny-raw-shell"
-    match:
-      command: ["bash", "sh", "zsh", "dash"]
+      command_contains:
+        - "ufw disable"
+        - "iptables -F"
+        - "iptables --flush"
+        - "nft flush"
     action: critical
     enforcement: deny
 
   - name: "deny-dangerous-rm"
     match:
-      command_contains: ["rm -rf /etc", "rm -rf /usr", "rm -rf /var", "rm -rf /"]
+      command_contains:
+        - "rm -rf /etc"
+        - "rm -rf /usr"
+        - "rm -rf /var"
+        - "rm -rf /home"
+        - "rm -rf /boot"
+        - "rm -rf /"
+    action: critical
+    enforcement: deny
+
+  - name: "deny-reverse-shell"
+    description: "Block reverse shell patterns via sudo"
+    match:
+      command_contains:
+        - "/dev/tcp/"
+        - "/dev/udp/"
+        - "bash -i"
+        - "sh -i"
+        - "nc -e"
+    action: critical
+    enforcement: deny
+
+  # ── Catch-all: deny raw shell via sudo ─────────────────────────────────────
+  # This ONLY applies to clawsudo (sudo proxy), NOT to normal bash execution.
+  # Agents shouldn't need `sudo bash` — specific commands should be allowlisted above.
+  - name: "deny-sudo-shell"
+    description: "Block sudo to raw shell (use specific commands instead)"
+    match:
+      command: ["bash", "sh", "zsh", "dash"]
     action: critical
     enforcement: deny

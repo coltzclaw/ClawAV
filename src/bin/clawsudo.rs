@@ -438,7 +438,7 @@ mod tests {
         let rules = load_test_rules();
         let result = evaluate(&rules, "bash", "bash").unwrap();
         assert_eq!(result.enforcement, Enforcement::Deny);
-        assert_eq!(result.rule_name, "deny-raw-shell");
+        assert_eq!(result.rule_name, "deny-sudo-shell");
     }
 
     #[test]

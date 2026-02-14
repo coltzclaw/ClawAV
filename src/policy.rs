@@ -15,6 +15,9 @@ pub struct PolicyRule {
     #[serde(rename = "match")]
     pub match_spec: MatchSpec,
     pub action: String,
+    /// If set (allow/deny), this is a clawsudo enforcement rule — skip in detection-only pipeline
+    #[serde(default)]
+    pub enforcement: Option<String>,
 }
 
 /// Match specification within a rule
@@ -130,6 +133,10 @@ impl PolicyEngine {
         let mut best: Option<PolicyVerdict> = None;
 
         for rule in &self.rules {
+            // Skip enforcement-only rules (clawsudo) in detection pipeline
+            if rule.enforcement.is_some() {
+                continue;
+            }
             if self.matches_rule(rule, event) {
                 let severity = action_to_severity(&rule.action);
                 let dominated = best.as_ref().map_or(true, |b| severity_rank(&severity) > severity_rank(&b.severity));
