@@ -111,18 +111,35 @@ for pattern in injection-patterns.json dangerous-commands.json privacy-rules.jso
         warn "  ✗ $pattern (non-fatal)"
 done
 
-# ── Install auditd ───────────────────────────────────────────────────────────
+# ── Install dependencies ──────────────────────────────────────────────────────
+if command -v apt-get &>/dev/null; then
+    PKG_MGR="apt"
+elif command -v dnf &>/dev/null; then
+    PKG_MGR="dnf"
+elif command -v pacman &>/dev/null; then
+    PKG_MGR="pacman"
+else
+    PKG_MGR=""
+fi
+
 if ! command -v auditctl &>/dev/null; then
     log "Installing auditd..."
-    if command -v apt-get &>/dev/null; then
-        apt-get update -qq && apt-get install -y -qq auditd
-    elif command -v dnf &>/dev/null; then
-        dnf install -y -q audit
-    elif command -v pacman &>/dev/null; then
-        pacman -S --noconfirm audit
-    else
-        warn "Could not install auditd — install it manually"
-    fi
+    case "$PKG_MGR" in
+        apt)    apt-get update -qq && apt-get install -y -qq auditd ;;
+        dnf)    dnf install -y -q audit ;;
+        pacman) pacman -S --noconfirm audit ;;
+        *)      warn "Could not install auditd — install it manually" ;;
+    esac
+fi
+
+if ! command -v apparmor_parser &>/dev/null; then
+    log "Installing AppArmor..."
+    case "$PKG_MGR" in
+        apt)    apt-get install -y -qq apparmor apparmor-utils ;;
+        dnf)    dnf install -y -q apparmor apparmor-utils ;;
+        pacman) pacman -S --noconfirm apparmor ;;
+        *)      warn "Could not install AppArmor — install it manually" ;;
+    esac
 fi
 
 # ── Create directories and install files (NOT locked down yet) ────────────────
