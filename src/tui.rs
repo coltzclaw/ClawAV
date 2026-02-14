@@ -113,17 +113,28 @@ impl App {
 
         match key {
             KeyCode::Char('q') | KeyCode::Esc if !self.config_editing => self.should_quit = true,
-            KeyCode::Tab | KeyCode::Right if !self.config_editing => {
+            // Config tab: Left/Right navigate sections, only Tab/BackTab switch tabs
+            KeyCode::Tab if !self.config_editing => {
                 self.selected_tab = (self.selected_tab + 1) % self.tab_titles.len();
             }
-            KeyCode::BackTab | KeyCode::Left if !self.config_editing => {
+            KeyCode::BackTab if !self.config_editing => {
                 if self.selected_tab > 0 {
                     self.selected_tab -= 1;
                 } else {
                     self.selected_tab = self.tab_titles.len() - 1;
                 }
             }
-            // Config tab specific keys
+            KeyCode::Right if !self.config_editing && self.selected_tab != 5 => {
+                self.selected_tab = (self.selected_tab + 1) % self.tab_titles.len();
+            }
+            KeyCode::Left if !self.config_editing && self.selected_tab != 5 => {
+                if self.selected_tab > 0 {
+                    self.selected_tab -= 1;
+                } else {
+                    self.selected_tab = self.tab_titles.len() - 1;
+                }
+            }
+            // Config tab specific keys (including Left/Right for section nav)
             _ if self.selected_tab == 5 => self.handle_config_key(key, modifiers),
             _ => {}
         }
