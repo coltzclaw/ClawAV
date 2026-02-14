@@ -49,6 +49,13 @@ jobs:
           cp target/${{ matrix.target }}/release/clawsudo dist/clawsudo-${{ matrix.target == 'aarch64-unknown-linux-gnu' && 'aarch64' || 'x86_64' }}-linux
           chmod +x dist/*
 
+      - name: Generate checksums
+        run: |
+          cd dist
+          for f in *; do
+            sha256sum "$f" > "${f}.sha256"
+          done
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
