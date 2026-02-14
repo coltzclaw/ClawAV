@@ -376,11 +376,44 @@ impl SecureClawEngine {
     }
 
     /// Check command specifically against dangerous command patterns
+    /// Known-safe sudo commands that should not trigger alerts.
+    /// These are legitimate system operations (ClawAV scans, service management, etc.)
+    const SUDO_ALLOWLIST: &'static [&'static str] = &[
+        "sudo ufw",
+        "sudo systemctl status",
+        "sudo systemctl start",
+        "sudo systemctl stop",
+        "sudo systemctl restart",
+        "sudo systemctl is-active",
+        "sudo journalctl",
+        "sudo auditctl",
+        "sudo apt",
+        "sudo apt-get",
+        "sudo cp ",
+        "sudo rm ",
+        "sudo mv ",
+        "sudo mkdir",
+        "sudo chown",
+        "sudo chmod",
+        "sudo tee ",
+        "sudo sed ",
+        "sudo cat ",
+    ];
+
     pub fn check_command(&self, cmd: &str) -> Vec<PatternMatch> {
         let mut matches = Vec::new();
+        let cmd_lower = cmd.to_lowercase();
 
         for pattern in &self.dangerous_commands {
             if let Some(matched) = pattern.regex.find(cmd) {
+                // Skip sudo alerts for known-safe commands
+                if pattern.category == "permission_escalation" 
+                    && matched.as_str().starts_with("sudo")
+                    && Self::SUDO_ALLOWLIST.iter().any(|allowed| cmd_lower.contains(allowed))
+                {
+                    continue;
+                }
+
                 matches.push(PatternMatch {
                     database: "dangerous_commands".to_string(),
                     category: pattern.category.clone(),
