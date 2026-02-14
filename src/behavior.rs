@@ -352,7 +352,12 @@ pub fn classify_behavior(event: &ParsedEvent) -> Option<(BehaviorCategory, Sever
 
         // --- CRITICAL: Persistence mechanisms ---
         if PERSISTENCE_BINARIES.iter().any(|&c| binary.eq_ignore_ascii_case(c)) {
-            return Some((BehaviorCategory::SecurityTamper, Severity::Critical));
+            // crontab -l is read-only listing, not a modification
+            if binary.eq_ignore_ascii_case("crontab") && args.iter().any(|a| a == "-l") {
+                // Skip — listing crontabs is harmless
+            } else {
+                return Some((BehaviorCategory::SecurityTamper, Severity::Critical));
+            }
         }
 
         // systemd timer/service creation
@@ -520,6 +525,10 @@ pub fn classify_behavior(event: &ParsedEvent) -> Option<(BehaviorCategory, Sever
         // --- WARNING: Scheduled task manipulation ---
         for pattern in SCHEDULED_TASK_BINARIES {
             if binary == *pattern {
+                // crontab -l is read-only listing, not manipulation
+                if binary == "crontab" && args.iter().any(|a| a == "-l") {
+                    continue;
+                }
                 return Some((BehaviorCategory::SecurityTamper, Severity::Warning));
             }
         }
@@ -1159,6 +1168,20 @@ mod tests {
         let event = make_exec_event(&["crontab", "-e"]);
         let result = classify_behavior(&event);
         assert_eq!(result, Some((BehaviorCategory::SecurityTamper, Severity::Critical)));
+    }
+
+    #[test]
+    fn test_crontab_list_is_not_persistence() {
+        let event = make_exec_event(&["crontab", "-l"]);
+        let result = classify_behavior(&event);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_crontab_list_user_is_not_persistence() {
+        let event = make_exec_event(&["crontab", "-l", "-u", "redis"]);
+        let result = classify_behavior(&event);
+        assert_eq!(result, None);
     }
 
     #[test]

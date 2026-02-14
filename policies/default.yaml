@@ -274,7 +274,7 @@ rules:
     match:
       command_contains:
         - "crontab -e"
-        - "crontab -l"
+        - "crontab -r"
       file_access:
         - "/etc/cron.d/*"
         - "/etc/cron.daily/*"
