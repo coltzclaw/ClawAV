@@ -18,7 +18,7 @@ use sha2::{Sha256, Digest};
 use tokio::sync::mpsc;
 
 use crate::alerts::{Alert, Severity};
-use crate::config::{SentinelConfig, WatchPathConfig, WatchPolicy};
+use crate::config::{SentinelConfig, WatchPolicy};
 use crate::secureclaw::SecureClawEngine;
 
 /// Compute a shadow file path: shadow_dir / hex(sha256(file_path))[..16]
@@ -334,6 +334,7 @@ impl Sentinel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::WatchPathConfig;
 
     #[test]
     fn test_shadow_path_uniqueness() {

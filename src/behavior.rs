@@ -15,7 +15,7 @@
 use std::fmt;
 
 use crate::alerts::Severity;
-use crate::auditd::{Actor, ParsedEvent};
+use crate::auditd::ParsedEvent;
 
 /// Categories of suspicious behavior detected by the hardcoded rules engine.
 ///
@@ -845,6 +845,7 @@ pub fn classify_behavior(event: &ParsedEvent) -> Option<(BehaviorCategory, Sever
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auditd::Actor;
 
     fn make_exec_event(args: &[&str]) -> ParsedEvent {
         ParsedEvent {

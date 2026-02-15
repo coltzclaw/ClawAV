@@ -1277,6 +1277,7 @@ pub fn scan_immutable_flags() -> ScanResult {
     let optional_files = [
         "/usr/local/bin/clawav-tray",
         "/etc/clawav/admin.key.hash",
+        "/etc/sudoers.d/clawav-deny",
     ];
 
     let mut missing = Vec::new();

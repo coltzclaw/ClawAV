@@ -218,7 +218,6 @@ fn compute_sha256(path: &Path) -> Result<String> {
 
 /// Shadow directory for storing previous versions of watched files
 const SHADOW_DIR: &str = "/etc/clawav/cognitive-shadow";
-const QUARANTINE_DIR: &str = "/etc/clawav/quarantine";
 
 /// Generate a unified diff between the shadow (previous) and current version
 fn generate_diff(current_path: &Path, _workspace_dir: &Path) -> Option<String> {
@@ -298,7 +297,7 @@ fn save_shadow(path: &Path) {
 /// Creates baselines on first run, then checks for modifications, deletions,
 /// and new files. Protected file changes are CRIT; watched file changes are WARN
 /// with auto-rebaseline.
-pub fn scan_cognitive_integrity(workspace_dir: &Path, baseline_path: &Path, secureclaw: Option<&crate::secureclaw::SecureClawEngine>) -> Vec<ScanResult> {
+pub fn scan_cognitive_integrity(workspace_dir: &Path, baseline_path: &Path, _secureclaw: Option<&crate::secureclaw::SecureClawEngine>) -> Vec<ScanResult> {
     // If no baseline exists yet, create one and save shadows
     if !baseline_path.exists() {
         let baseline = CognitiveBaseline::from_workspace(workspace_dir);
