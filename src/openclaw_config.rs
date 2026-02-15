@@ -27,6 +27,8 @@ const REGRESSION_RULES: &[(&str, &str)] = &[
     ("logging.redactSensitive", "off"),
     ("controlUi.dangerouslyDisableDeviceAuth", "true"),
     ("controlUi.allowInsecureAuth", "true"),
+    ("sandbox.mode", ""),           // sandbox disabled
+    ("tools.profile", "full"),      // overly permissive tool access
 ];
 
 /// DM/group policy fields — regression if changed to "open"
@@ -280,6 +282,18 @@ mod tests {
     fn test_is_security_regression_bind() {
         assert!(is_security_regression("gateway.bind", "0.0.0.0"));
         assert!(!is_security_regression("gateway.bind", "loopback"));
+    }
+
+    #[test]
+    fn test_is_security_regression_sandbox() {
+        assert!(is_security_regression("sandbox.mode", ""));
+        assert!(!is_security_regression("sandbox.mode", "strict"));
+    }
+
+    #[test]
+    fn test_is_security_regression_tools_profile() {
+        assert!(is_security_regression("tools.profile", "full"));
+        assert!(!is_security_regression("tools.profile", "minimal"));
     }
 
     #[test]
