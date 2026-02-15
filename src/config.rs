@@ -95,10 +95,31 @@ pub struct NetworkConfig {
     pub enabled: bool,
     #[serde(default = "default_network_source")]
     pub source: String,
+    /// CIDR ranges to never alert on
+    #[serde(default = "default_allowlisted_cidrs")]
+    pub allowlisted_cidrs: Vec<String>,
+    /// Extra ports to never alert on
+    #[serde(default = "default_allowlisted_ports")]
+    pub allowlisted_ports: Vec<u16>,
 }
 
 fn default_network_source() -> String {
     "auto".to_string()
+}
+
+pub fn default_allowlisted_cidrs() -> Vec<String> {
+    vec![
+        "192.168.0.0/16".to_string(),
+        "10.0.0.0/8".to_string(),
+        "172.16.0.0/12".to_string(),
+        "169.254.0.0/16".to_string(),
+        "127.0.0.0/8".to_string(),
+        "224.0.0.0/4".to_string(),
+    ]
+}
+
+pub fn default_allowlisted_ports() -> Vec<u16> {
+    vec![443, 53, 123, 5353]
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

@@ -27,6 +27,7 @@ hex = "0.4"
 regex = "1"
 serde_yaml = "0.9"
 glob-match = "0.2"
+ipnet = "2"
 
 [[bin]]
 name = "clawav"
