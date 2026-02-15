@@ -26,6 +26,8 @@ pub struct Config {
     pub netpolicy: NetPolicyConfig,
     #[serde(default)]
     pub ssh: SshConfig,
+    #[serde(default)]
+    pub sentinel: SentinelConfig,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -263,6 +265,75 @@ impl Default for NetPolicyConfig {
             allowed_ports: vec![80, 443, 53],
             blocked_hosts: Vec::new(),
             mode: "blocklist".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct SentinelConfig {
+    #[serde(default = "default_sentinel_enabled")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub watch_paths: Vec<WatchPathConfig>,
+    #[serde(default = "default_quarantine_dir")]
+    pub quarantine_dir: String,
+    #[serde(default = "default_shadow_dir")]
+    pub shadow_dir: String,
+    #[serde(default = "default_debounce_ms")]
+    pub debounce_ms: u64,
+    #[serde(default = "default_scan_content")]
+    pub scan_content: bool,
+    #[serde(default = "default_max_file_size_kb")]
+    pub max_file_size_kb: u64,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct WatchPathConfig {
+    pub path: String,
+    pub patterns: Vec<String>,
+    pub policy: WatchPolicy,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum WatchPolicy {
+    Protected,
+    Watched,
+}
+
+fn default_sentinel_enabled() -> bool { true }
+fn default_quarantine_dir() -> String { "/etc/clawav/quarantine".to_string() }
+fn default_shadow_dir() -> String { "/etc/clawav/sentinel-shadow".to_string() }
+fn default_debounce_ms() -> u64 { 200 }
+fn default_scan_content() -> bool { true }
+fn default_max_file_size_kb() -> u64 { 1024 }
+
+impl Default for SentinelConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            watch_paths: vec![
+                WatchPathConfig {
+                    path: "/home/openclaw/.openclaw/workspace/SOUL.md".to_string(),
+                    patterns: vec!["*".to_string()],
+                    policy: WatchPolicy::Protected,
+                },
+                WatchPathConfig {
+                    path: "/home/openclaw/.openclaw/workspace/AGENTS.md".to_string(),
+                    patterns: vec!["*".to_string()],
+                    policy: WatchPolicy::Protected,
+                },
+                WatchPathConfig {
+                    path: "/home/openclaw/.openclaw/workspace/MEMORY.md".to_string(),
+                    patterns: vec!["*".to_string()],
+                    policy: WatchPolicy::Watched,
+                },
+            ],
+            quarantine_dir: default_quarantine_dir(),
+            shadow_dir: default_shadow_dir(),
+            debounce_ms: default_debounce_ms(),
+            scan_content: default_scan_content(),
+            max_file_size_kb: default_max_file_size_kb(),
         }
     }
 }
