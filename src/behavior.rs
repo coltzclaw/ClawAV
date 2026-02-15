@@ -1,7 +1,7 @@
 use std::fmt;
 
 use crate::alerts::Severity;
-use crate::auditd::ParsedEvent;
+use crate::auditd::{Actor, ParsedEvent};
 
 /// Categories of suspicious behavior
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -330,6 +330,12 @@ const GIT_CREDENTIAL_PATTERNS: &[&str] = &[
     ".gitconfig",
 ];
 
+/// Build tools whose child processes should not trigger SEC_TAMPER for linker activity
+const BUILD_TOOL_BASES: &[&str] = &[
+    "cargo", "rustc", "cc", "cc1", "cc1plus", "gcc", "g++",
+    "collect2", "ld", "make", "cmake", "ninja", "as",
+];
+
 /// Classify a parsed audit event against known attack patterns.
 /// Returns Some((category, severity)) if the event matches a rule, None otherwise.
 pub fn classify_behavior(event: &ParsedEvent) -> Option<(BehaviorCategory, Severity)> {
@@ -391,6 +397,13 @@ pub fn classify_behavior(event: &ParsedEvent) -> Option<(BehaviorCategory, Sever
                         if ["ld", "collect2", "cc1", "cc1plus", "gcc", "g++", "rustc", "cc"].contains(&binary) {
                             // Normal compilation — linker uses -dynamic-linker /lib/ld-linux-*.so.1
                             // This is not an LD_PRELOAD bypass
+                        } else if let Some(ref ppid_exe) = event.ppid_exe {
+                            let parent_base = ppid_exe.rsplit('/').next().unwrap_or(ppid_exe);
+                            if BUILD_TOOL_BASES.iter().any(|t| parent_base.starts_with(t)) {
+                                // Parent is a build tool — suppress
+                            } else {
+                                return Some((BehaviorCategory::SecurityTamper, Severity::Critical));
+                            }
                         } else {
                             return Some((BehaviorCategory::SecurityTamper, Severity::Critical));
                         }
@@ -408,6 +421,12 @@ pub fn classify_behavior(event: &ParsedEvent) -> Option<(BehaviorCategory, Sever
 
         // Direct invocation of the dynamic linker (bypass LD_PRELOAD)
         if binary == "ld-linux-aarch64.so.1" || binary == "ld-linux-x86-64.so.2" || binary.starts_with("ld-linux") || binary == "ld.so" {
+            if let Some(ref ppid_exe) = event.ppid_exe {
+                let parent_base = ppid_exe.rsplit('/').next().unwrap_or(ppid_exe);
+                if BUILD_TOOL_BASES.iter().any(|t| parent_base.starts_with(t)) {
+                    return None; // Build tool spawned the linker — not an attack
+                }
+            }
             return Some((BehaviorCategory::SecurityTamper, Severity::Critical));
         }
 
@@ -819,6 +838,21 @@ mod tests {
             file_path: None,
             success: true,
             raw: String::new(),
+            actor: Actor::Unknown,
+            ppid_exe: None,
+        }
+    }
+
+    fn make_exec_event_with_parent(args: &[&str], ppid_exe: &str) -> ParsedEvent {
+        ParsedEvent {
+            syscall_name: "execve".to_string(),
+            command: Some(args.join(" ")),
+            args: args.iter().map(|s| s.to_string()).collect(),
+            file_path: None,
+            success: true,
+            raw: String::new(),
+            actor: Actor::Unknown,
+            ppid_exe: Some(ppid_exe.to_string()),
         }
     }
 
@@ -830,6 +864,8 @@ mod tests {
             file_path: Some(path.to_string()),
             success: true,
             raw: String::new(),
+            actor: Actor::Unknown,
+            ppid_exe: None,
         }
     }
 
@@ -1313,6 +1349,36 @@ mod tests {
         let result = classify_behavior(&event);
         assert!(result.is_none() || result.unwrap().0 != BehaviorCategory::SecurityTamper, 
             "Normal linker invocation should not be flagged as SEC_TAMPER");
+    }
+
+    #[test]
+    fn test_dynamic_linker_suppressed_when_parent_is_cargo() {
+        let event = make_exec_event_with_parent(
+            &["ld-linux-aarch64.so.1", "--preload", "/tmp/evil.so", "/usr/bin/curl"],
+            "/home/user/.cargo/bin/cargo",
+        );
+        let result = classify_behavior(&event);
+        assert_eq!(result, None, "Dynamic linker invoked by cargo should be suppressed");
+    }
+
+    #[test]
+    fn test_dynamic_linker_not_suppressed_without_build_parent() {
+        let event = make_exec_event_with_parent(
+            &["ld-linux-aarch64.so.1", "--preload", "/tmp/evil.so", "/usr/bin/curl"],
+            "/usr/bin/bash",
+        );
+        let result = classify_behavior(&event);
+        assert_eq!(result, Some((BehaviorCategory::SecurityTamper, Severity::Critical)));
+    }
+
+    #[test]
+    fn test_ld_preload_suppressed_when_parent_is_gcc() {
+        let event = make_exec_event_with_parent(
+            &["bash", "-c", "echo ld-linux something"],
+            "/usr/bin/gcc",
+        );
+        let result = classify_behavior(&event);
+        assert_eq!(result, None, "LD_PRELOAD pattern from gcc child should be suppressed");
     }
 
     #[test]
