@@ -2,23 +2,6 @@
 
 > **ClawAV** is a tamper-proof, OS-level security watchdog for AI agents. It monitors the host system for threats, policy violations, and tampering — then alerts via TUI dashboard and Slack. It is designed so that even the AI agent it protects **cannot disable or modify it** (the "swallowed key" pattern).
 
-## Glossary
-
-| Term | Meaning |
-|------|---------|
-| **Swallowed key** | Security pattern where the admin key is shown once at setup and never stored — like swallowing a physical key. The agent can't unlock what it can't find. |
-| **Sentinel** | ClawAV's real-time file watcher (built on Linux inotify). Distinct from the periodic scanner. |
-| **Cognitive** | ClawAV's AI identity file protection system — monitors files like `SOUL.md` that define the agent's personality/behavior. |
-| **SecureClaw** | A vendor pattern engine that loads JSON regex databases to detect prompt injection, dangerous commands, PII, and supply-chain threats. |
-| **DLP** | Data Loss Prevention — scanning outbound data for sensitive content (SSNs, API keys, credit cards) and blocking/redacting it. |
-| **chattr +i** | Linux command to set the "immutable" flag on a file. Even root can't modify/delete the file until `chattr -i` removes the flag. |
-| **auditd** | Linux kernel audit framework — logs syscalls (command execution, file access, network connections) at the OS level. |
-| **auid** | Audit UID — the original login UID that persists even after `su`/`sudo`. Value `4294967295` means "unset" (service/agent, not an interactive login). |
-| **Falco** | Third-party eBPF-based runtime security tool. ClawAV can tail its logs as an additional event source. |
-| **Samhain** | Third-party file integrity monitoring tool. ClawAV can tail its logs as an additional event source. |
-| **UID** | Numeric User ID in Linux (e.g., `1000`). NOT the username. Find with `id -u <username>`. |
-| **mpsc** | Multi-producer, single-consumer channel — Tokio's async message passing primitive used for the alert pipeline. |
-
 ## Table of Contents
 
 1. [Project Overview](#project-overview)
@@ -989,6 +972,10 @@ To add defaults at compile time, modify `SentinelConfig::default()` in `src/conf
 | **Sentinel** | The real-time file integrity monitor built on Linux inotify. Watches configured paths with two policies: **protected** (quarantine + restore from shadow on change) and **watched** (update shadow, info alert with diff). |
 | **Shadow Copy** | A known-good baseline copy of a watched file, stored in `/etc/clawav/sentinel-shadow/` (for Sentinel) or `/etc/clawav/cognitive-shadow/` (for Cognitive monitoring). Used for diff generation and restoration. |
 | **Swallowed Key Pattern** | ClawAV's core security model: critical files are made immutable (`chattr +i`), the admin key is displayed once and never stored, and the AI agent's capabilities are stripped — making it impossible for software alone to disable the watchdog. |
+| **UID** | Numeric User ID in Linux (e.g., `1000`). NOT the username string. `watched_users` in config takes UIDs, not usernames. Find with `id -u <username>`. |
+| **auid** | Audit UID — the original login UID that persists across `su`/`sudo`. Value `4294967295` (0xFFFFFFFF) means "unset" (service/agent, not an interactive login). Used by ClawAV to distinguish agent vs human actions. |
+| **chattr +i** | Linux command to set the "immutable" file attribute. Even root cannot modify/delete the file until `chattr -i` removes it. Core to the swallowed key pattern. |
+| **mpsc** | Multi-producer, single-consumer — Tokio's async channel type used for the three-stage alert pipeline (raw→aggregator→consumers). |
 
 ---
 
