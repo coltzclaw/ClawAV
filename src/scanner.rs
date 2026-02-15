@@ -1579,6 +1579,70 @@ fn check_symlinks_in_dir(dir: &str) -> ScanResult {
     }
 }
 
+/// Parse `openclaw security audit` text output into ScanResults.
+///
+/// Line format: `✓ description` (pass), `⚠ description` (warn), `✗ description` (fail)
+fn parse_openclaw_audit_output(output: &str) -> Vec<ScanResult> {
+    let mut results = Vec::new();
+    for line in output.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() { continue; }
+        
+        let (status, detail) = if trimmed.starts_with('✓') {
+            (ScanStatus::Pass, trimmed.trim_start_matches('✓').trim())
+        } else if trimmed.starts_with('⚠') {
+            (ScanStatus::Warn, trimmed.trim_start_matches('⚠').trim())
+        } else if trimmed.starts_with('✗') {
+            (ScanStatus::Fail, trimmed.trim_start_matches('✗').trim())
+        } else {
+            continue; // skip non-finding lines (headers, etc.)
+        };
+        
+        // Extract category from description (first word before colon, or "general")
+        let category = detail.split(':').next()
+            .unwrap_or("general")
+            .trim()
+            .to_lowercase()
+            .replace(' ', "_");
+        
+        results.push(ScanResult::new(
+            &format!("openclaw:audit:{}", category),
+            status,
+            detail,
+        ));
+    }
+    results
+}
+
+/// Run `openclaw security audit --deep` and parse results.
+fn run_openclaw_audit(command: &str) -> Vec<ScanResult> {
+    let parts: Vec<&str> = command.split_whitespace().collect();
+    if parts.is_empty() {
+        return vec![ScanResult::new("openclaw:audit", ScanStatus::Warn,
+            "Empty audit command configured")];
+    }
+    
+    match Command::new(parts[0]).args(&parts[1..]).output() {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let mut results = parse_openclaw_audit_output(&stdout);
+            if results.is_empty() && !stderr.is_empty() {
+                results.push(ScanResult::new("openclaw:audit", ScanStatus::Warn,
+                    &format!("Audit produced no findings. stderr: {}", 
+                        stderr.chars().take(200).collect::<String>())));
+            }
+            if !output.status.success() {
+                results.push(ScanResult::new("openclaw:audit", ScanStatus::Warn,
+                    &format!("Audit exited with code {}", output.status)));
+            }
+            results
+        }
+        Err(e) => vec![ScanResult::new("openclaw:audit", ScanStatus::Warn,
+            &format!("Failed to run audit: {} (is openclaw installed?)", e))],
+    }
+}
+
 fn scan_openclaw_security() -> Vec<ScanResult> {
     let mut results = Vec::new();
 
@@ -1927,5 +1991,40 @@ rules 0
     fn test_check_symlinks_missing_dir() {
         let result = check_symlinks_in_dir("/nonexistent/dir/12345");
         assert_eq!(result.status, ScanStatus::Warn);
+    }
+
+    #[test]
+    fn test_parse_openclaw_audit_output() {
+        let output = "⚠ Gateway auth: mode is 'none' — anyone on the network can connect\n✓ DM policy: pairing (secure)\n⚠ groupPolicy is 'open' for slack — restrict to allowlist\n✓ Filesystem permissions: ~/.openclaw is 700\n✗ Browser control: CDP port exposed on 0.0.0.0";
+        let results = parse_openclaw_audit_output(output);
+        assert_eq!(results.len(), 5);
+        assert_eq!(results[0].status, ScanStatus::Warn);
+        assert_eq!(results[1].status, ScanStatus::Pass);
+        assert_eq!(results[2].status, ScanStatus::Warn);
+        assert_eq!(results[3].status, ScanStatus::Pass);
+        assert_eq!(results[4].status, ScanStatus::Fail);
+    }
+
+    #[test]
+    fn test_parse_openclaw_audit_empty() {
+        let results = parse_openclaw_audit_output("");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_parse_openclaw_audit_with_headers() {
+        let output = "OpenClaw Security Audit\n=======================\n✓ Gateway bound to loopback\n⚠ No auth configured";
+        let results = parse_openclaw_audit_output(output);
+        assert_eq!(results.len(), 2); // headers skipped
+        assert_eq!(results[0].status, ScanStatus::Pass);
+        assert_eq!(results[1].status, ScanStatus::Warn);
+    }
+
+    #[test]
+    fn test_parse_openclaw_audit_categories() {
+        let output = "✓ DM policy: pairing mode active\n✗ Browser control: exposed";
+        let results = parse_openclaw_audit_output(output);
+        assert!(results[0].category.contains("openclaw:audit:dm_policy"));
+        assert!(results[1].category.contains("openclaw:audit:browser_control"));
     }
 }
