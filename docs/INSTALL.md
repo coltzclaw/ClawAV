@@ -24,9 +24,11 @@
    Creates `libclawguard.so` in the project root
 
 3. **Configure `config.toml`:**
-   - Set `watched_user` to the UID of your AI agent user
+   - Set `watched_users` to the UIDs of your AI agent users (e.g., `["1000"]`), or set `watch_all_users = true`
+   - Legacy: `watched_user` (single UID) is still supported but `watched_users` (list) is preferred
    - Set `slack.webhook_url` to an **independent** Slack webhook (not the agent's)
    - Optionally set `slack.backup_webhook_url` for failover
+   - See [ALERT-PIPELINE.md](ALERT-PIPELINE.md#tuning-alerts) for all config options
 
 4. **Ensure auditd is running:**
    ```bash
@@ -145,6 +147,26 @@ curl http://localhost:18791/api/status
 # Verify audit chain
 /usr/local/bin/clawav verify-audit
 ```
+
+## CLI Commands
+
+After installation, ClawAV provides these commands:
+
+| Command | Description |
+|---------|-------------|
+| `clawav run` | Start with TUI dashboard (default) |
+| `clawav run --headless` | Start in headless/daemon mode |
+| `clawav scan` | One-shot security scan and exit |
+| `clawav status` | Show service status |
+| `clawav configure` | Interactive configuration wizard |
+| `clawav update` | Self-update from GitHub releases |
+| `clawav verify-audit` | Verify audit chain integrity |
+| `clawav sync` | Update SecureClaw pattern databases |
+| `clawav harden` | Apply tamper-proof hardening |
+| `clawav uninstall` | Remove ClawAV (requires admin key) |
+| `clawav logs` | Tail service logs |
+
+See also: [ARCHITECTURE.md](ARCHITECTURE.md) for module overview, [ALERT-PIPELINE.md](ALERT-PIPELINE.md) for alert flow, [SENTINEL.md](SENTINEL.md) for file integrity monitoring.
 
 ## ⚠️ The Admin Key — SAVE IT!
 
