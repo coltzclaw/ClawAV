@@ -8,7 +8,7 @@ use sha2::{Sha256, Digest};
 use tokio::sync::mpsc;
 
 use crate::alerts::{Alert, Severity};
-use crate::config::{SentinelConfig, WatchPolicy};
+use crate::config::{SentinelConfig, WatchPathConfig, WatchPolicy};
 use crate::secureclaw::SecureClawEngine;
 
 /// Compute a shadow file path: shadow_dir / hex(sha256(file_path))[..16]
@@ -344,6 +344,109 @@ mod tests {
         let _ = std::fs::write(&rotated, "old");
         assert!(is_log_rotation(&log.to_string_lossy()));
         let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_handle_change_protected_quarantines() {
+        let tmp = std::env::temp_dir().join("sentinel_test_protected");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let shadow_dir = tmp.join("shadow");
+        let quarantine_dir = tmp.join("quarantine");
+        let workspace = tmp.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+
+        let soul_path = workspace.join("SOUL.md");
+        let original = "I am the soul file.\n";
+        std::fs::write(&soul_path, original).unwrap();
+
+        let config = SentinelConfig {
+            enabled: true,
+            watch_paths: vec![WatchPathConfig {
+                path: soul_path.to_string_lossy().to_string(),
+                patterns: vec!["*".to_string()],
+                policy: WatchPolicy::Protected,
+            }],
+            quarantine_dir: quarantine_dir.to_string_lossy().to_string(),
+            shadow_dir: shadow_dir.to_string_lossy().to_string(),
+            debounce_ms: 200,
+            scan_content: false,
+            max_file_size_kb: 1024,
+        };
+
+        let (tx, mut rx) = mpsc::channel::<Alert>(16);
+        let sentinel = Sentinel::new(config, tx, None).unwrap();
+
+        // Shadow should have been initialized with original content
+        // Now write malicious content
+        std::fs::write(&soul_path, "HACKED CONTENT\n").unwrap();
+        sentinel.handle_change(&soul_path.to_string_lossy()).await;
+
+        // File should be restored
+        let restored = std::fs::read_to_string(&soul_path).unwrap();
+        assert_eq!(restored, original);
+
+        // Quarantine dir should have a file
+        let q_entries: Vec<_> = std::fs::read_dir(&quarantine_dir).unwrap().collect();
+        assert!(!q_entries.is_empty(), "quarantine should have a file");
+
+        // Alert should be Critical
+        let alert = rx.try_recv().unwrap();
+        assert_eq!(alert.severity, Severity::Critical);
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[tokio::test]
+    async fn test_handle_change_watched_allows_clean() {
+        let tmp = std::env::temp_dir().join("sentinel_test_watched");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let shadow_dir = tmp.join("shadow");
+        let quarantine_dir = tmp.join("quarantine");
+        let workspace = tmp.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+
+        let mem_path = workspace.join("MEMORY.md");
+        let original = "Original memory.\n";
+        std::fs::write(&mem_path, original).unwrap();
+
+        let config = SentinelConfig {
+            enabled: true,
+            watch_paths: vec![WatchPathConfig {
+                path: mem_path.to_string_lossy().to_string(),
+                patterns: vec!["*".to_string()],
+                policy: WatchPolicy::Watched,
+            }],
+            quarantine_dir: quarantine_dir.to_string_lossy().to_string(),
+            shadow_dir: shadow_dir.to_string_lossy().to_string(),
+            debounce_ms: 200,
+            scan_content: false,
+            max_file_size_kb: 1024,
+        };
+
+        let (tx, mut rx) = mpsc::channel::<Alert>(16);
+        let sentinel = Sentinel::new(config, tx, None).unwrap();
+
+        let new_content = "Updated memory content.\n";
+        std::fs::write(&mem_path, new_content).unwrap();
+        sentinel.handle_change(&mem_path.to_string_lossy()).await;
+
+        // File should keep new content
+        let current = std::fs::read_to_string(&mem_path).unwrap();
+        assert_eq!(current, new_content);
+
+        // Shadow should be updated to new content
+        let shadow = shadow_path_for(
+            &shadow_dir.to_string_lossy(),
+            &mem_path.to_string_lossy(),
+        );
+        let shadow_content = std::fs::read_to_string(&shadow).unwrap();
+        assert_eq!(shadow_content, new_content);
+
+        // Alert should be Info
+        let alert = rx.try_recv().unwrap();
+        assert_eq!(alert.severity, Severity::Info);
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
