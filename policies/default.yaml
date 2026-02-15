@@ -31,6 +31,8 @@ rules:
         - "registry.npmjs.org"
         - "crates.io"
         - "pypi.org"
+        # Utilities
+        - "wttr.in"
     action: critical
 
   # ── Reverse Shell Detection ────────────────────────────────────────────────

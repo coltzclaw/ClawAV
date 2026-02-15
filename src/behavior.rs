@@ -580,7 +580,7 @@ pub fn classify_behavior(event: &ParsedEvent) -> Option<(BehaviorCategory, Sever
             "gottamolt.gg", "mahamedia.us", "localhost", "127.0.0.1",
             "api.anthropic.com", "api.openai.com", "github.com",
             "hooks.slack.com", "amazonaws.com", "registry.npmjs.org",
-            "crates.io", "pypi.org", "api.brave.com",
+            "crates.io", "pypi.org", "api.brave.com", "wttr.in",
         ];
         if EXFIL_COMMANDS.iter().any(|&c| binary.eq_ignore_ascii_case(c)) {
             let full_cmd_lower = args.join(" ").to_lowercase();
