@@ -15,13 +15,19 @@ main.rs
 ├── slack.rs           (SlackNotifier — independent webhook)
 ├── tui.rs             (Ratatui dashboard — consumes Alert stream)
 ├── scanner.rs         (periodic security scans)
+│   └── cognitive.rs   (AI identity file integrity — called by scanner)
+├── sentinel.rs        (real-time file integrity via inotify)
+├── secureclaw.rs      (vendor threat pattern engine — regex DBs)
 ├── admin.rs           (Unix socket + Argon2 auth)
 ├── firewall.rs        (UFW state monitor)
+├── logtamper.rs       (audit log tampering detection)
 ├── network.rs         (iptables log parser)
 ├── journald.rs        (journalctl -k tail, reuses network parser)
+├── netpolicy.rs       (outbound connection allowlist/blocklist)
 ├── falco.rs           (Falco JSON log tail)
 ├── samhain.rs         (Samhain FIM log tail)
-└── proxy.rs           (LLM API proxy with key mapping + DLP)
+├── proxy.rs           (LLM API proxy with key mapping + DLP)
+└── update.rs          (self-update from GitHub + Ed25519 verify)
 
 bin/clawsudo.rs        (standalone binary, own policy loader)
 preload/interpose.c    (standalone .so, no Rust dependency)
@@ -37,11 +43,14 @@ preload/interpose.c    (standalone .so, no Rust dependency)
                            │
   ┌────────────┐    ┌──────▼──────┐    ┌──────────┐
   │  network   │──→ │             │    │          │
-  │  falco     │──→ │   raw_tx    │──→ │ Aggreg.  │──→ alert_tx ──→ TUI
-  │  samhain   │──→ │  (channel)  │    │          │
-  │  firewall  │──→ │             │    │  dedup   │──→ slack_tx ──→ Slack webhook
-  │  scanner   │──→ │             │    │  rate    │
-  │  admin     │──→ │             │    │  limit   │──→ api_store (ring buffer)
+  │  sentinel  │──→ │   raw_tx    │──→ │ Aggreg.  │──→ alert_tx ──→ TUI
+  │  falco     │──→ │  (channel)  │    │          │
+  │  samhain   │──→ │             │    │  dedup   │──→ slack_tx ──→ Slack webhook
+  │  firewall  │──→ │             │    │  rate    │
+  │  logtamper │──→ │             │    │  limit   │──→ api_store (ring buffer)
+  │  scanner   │──→ │             │    │          │
+  │  admin     │──→ │             │    │          │
+  │  proxy     │──→ │             │    │          │
   └────────────┘    └─────────────┘    │          │
                                        │  audit   │──→ audit.chain (append-only file)
                                        │  chain   │
@@ -71,24 +80,25 @@ The behavior engine (`src/behavior.rs`) applies hardcoded rules in priority orde
 
 | Priority | Category | Severity | Triggers |
 |----------|----------|----------|----------|
-| 1 | SEC_TAMPER | Critical | `ufw disable`, `systemctl stop auditd`, etc. (16 patterns) |
-| 2 | DATA_EXFIL | Critical | `curl`, `wget`, `nc`, `ncat`, `netcat`, `socat` |
-| 3 | PRIV_ESC | Critical | Read `/etc/shadow`, write `/etc/passwd`, edit `/etc/hosts` |
-| 4 | RECON | Warning | `whoami`, `id`, `uname`; reading `.env`, `.ssh/id_rsa`, `.aws/credentials` |
+| 1 | SEC_TAMPER | Critical | `ufw disable`, `systemctl stop auditd`, LD_PRELOAD bypass, log clearing, binary replacement, history tampering (16+ patterns) |
+| 2 | PRIV_ESC | Critical | Read `/etc/shadow`, write `/etc/passwd`, container escapes, SSH key injection, process injection |
+| 3 | DATA_EXFIL | Critical | `curl`, `wget`, `nc`, `ncat`, `netcat`, `socat` to non-safe hosts; DNS tunneling; network tunnels; memory dumps |
+| 4 | SIDE_CHAN | Critical/Warning | Cache attack tools (mastik, flush-reload, prime-probe, sgx-step); `perf_event_open` syscall |
+| 5 | RECON | Warning | `whoami`, `id`, `uname`; reading `.env`, `.ssh/id_rsa`, `.aws/credentials`; DNS lookups |
 
-Also checks syscall-level events: `openat` on sensitive paths, `unlinkat` on critical files.
+Also checks syscall-level events: `openat` on sensitive paths, `unlinkat` on critical files, container escape via `/var/run/docker.sock`, suspicious temp file creation. Build-tool child processes (cargo, gcc, etc.) are allowlisted to reduce false positives.
 
 ## Aggregator — Dedup and Rate Limiting
 
 The aggregator (`src/aggregator.rs`) sits between all sources and all consumers.
 
-**Deduplication:** Key = `"{source}:{message}"`. If the same key appears within 30 seconds, the duplicate is suppressed.
+**Deduplication:** Key = `"{source}:{fuzzy_message}"` where digits are replaced with `#`. If the same key appears within the dedup window, the duplicate is suppressed. Default windows: 30 seconds for normal sources, **1 hour** for `scan:`-prefixed sources.
 
 **Rate limiting:** Per-source, max 20 alerts per 60-second sliding window. Tracked via a vector of timestamps, pruned on each check.
 
 **Critical bypass:** Critical alerts have a tighter dedup window (5 seconds) but are never rate-limited.
 
-**Cleanup:** Every 100 processed alerts, old dedup entries (>90s) and empty rate limit buckets are pruned to prevent unbounded memory growth.
+**Cleanup:** Every 100 processed alerts, old dedup entries (>3× the larger dedup window) and empty rate limit buckets are pruned to prevent unbounded memory growth.
 
 ## Hash Chain Verification
 
@@ -128,6 +138,8 @@ Any tampering (modified message, deleted entry, reordered entries) breaks the ch
 | **policy engine** | Configurable threats | YAML rules with glob matching and whitelists |
 | **clawsudo** | Unauthorized privilege use | Policy gate before `sudo`, fail-secure default |
 | **LD_PRELOAD** | Syscall execution | Blocks calls at libc level *before* they happen |
+| **sentinel** | Real-time file tampering | inotify + quarantine/restore + SecureClaw content scanning |
+| **cognitive** | AI identity drift | SHA-256 baselines of SOUL.md, AGENTS.md, etc. |
 | **aggregator** | Alert fatigue | Dedup + rate limiting without suppressing criticals |
 | **audit chain** | Log tampering | SHA-256 hash chain, append-only |
 | **Slack webhook** | Agent silencing alerts | Independent webhook, not routed through agent |
