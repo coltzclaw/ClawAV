@@ -1,3 +1,14 @@
+//! Linux audit log parser and tail monitor.
+//!
+//! Parses auditd log lines (SYSCALL, EXECVE, AVC, ANOMALY records) into
+//! structured [`ParsedEvent`] values. Supports aarch64 syscall number mapping,
+//! hex-encoded EXECVE argument decoding, and actor attribution (agent vs human
+//! based on auid).
+//!
+//! The main entry point [`tail_audit_log_with_behavior_and_policy`] tails the
+//! audit log file and runs each event through the behavior detector, policy
+//! engine, SecureClaw patterns, and tamper detection before emitting alerts.
+
 use anyhow::Result;
 use std::io::{BufRead, BufReader};
 use std::fs::File;
@@ -102,7 +113,10 @@ fn syscall_name_aarch64(num: u32) -> &'static str {
     }
 }
 
-/// Extract a field value from an audit line (e.g. "syscall=221" → "221")
+/// Extract a key=value field from an audit log line.
+///
+/// Splits on whitespace, finds the token starting with `field=`, and returns
+/// the value portion with surrounding quotes stripped.
 pub fn extract_field<'a>(line: &'a str, field: &str) -> Option<&'a str> {
     let prefix = format!("{}=", field);
     line.split_whitespace()

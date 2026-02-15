@@ -1,9 +1,19 @@
+//! Slack webhook notification sender.
+//!
+//! Sends formatted alerts to Slack via incoming webhooks. Supports primary and
+//! backup webhook URLs for failover. Messages use color-coded attachments based
+//! on severity. Also sends startup announcements and periodic heartbeat messages.
+
 use anyhow::Result;
 use serde_json::json;
 
 use crate::alerts::Alert;
 use crate::config::SlackConfig;
 
+/// Sends formatted alerts and status messages to Slack via incoming webhooks.
+///
+/// Supports primary + backup webhook URLs for failover. Automatically disabled
+/// if no webhook URL is configured.
 pub struct SlackNotifier {
     webhook_url: String,
     backup_webhook_url: String,

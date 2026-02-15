@@ -1,3 +1,12 @@
+//! Tamper-evident hash-chained audit log.
+//!
+//! Every alert that passes through the aggregator is appended to a JSONL file
+//! where each entry contains a SHA-256 hash linking it to the previous entry
+//! (blockchain-style). This makes post-hoc deletion or modification of individual
+//! entries detectable via `clawav verify-audit`.
+//!
+//! The genesis entry uses a zero hash as its prev_hash.
+
 use anyhow::{bail, Context, Result};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -10,6 +19,10 @@ use crate::alerts::Alert;
 
 const GENESIS_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 
+/// A single entry in the hash-chained audit log.
+///
+/// Each entry contains the alert data plus a SHA-256 hash computed over
+/// `seq|ts|severity|source|message|prev_hash`, creating an unbreakable chain.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditEntry {
     pub seq: u64,
@@ -30,6 +43,10 @@ impl AuditEntry {
     }
 }
 
+/// Append-only hash chain for tamper-evident audit logging.
+///
+/// Resumes from existing chain files, maintaining the last sequence number
+/// and hash for continuity. Use [`AuditChain::verify`] to validate integrity.
 pub struct AuditChain {
     path: PathBuf,
     last_seq: u64,

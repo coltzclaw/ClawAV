@@ -1,3 +1,13 @@
+//! HTTP REST API server for external integrations.
+//!
+//! Exposes endpoints on a configurable bind address (default port 18791):
+//! - `GET /api/status` — system status, uptime, module state
+//! - `GET /api/alerts` — last 100 alerts as JSON
+//! - `GET /api/health` — health check with last alert age
+//! - `GET /api/security` — alert counts by severity and source
+//!
+//! Uses a [`SharedAlertStore`] (Arc<Mutex<AlertRingBuffer>>) shared with the aggregator.
+
 use std::collections::VecDeque;
 use std::convert::Infallible;
 use std::net::SocketAddr;
@@ -11,7 +21,10 @@ use tokio::sync::Mutex;
 
 use crate::alerts::{Alert, Severity};
 
-/// Shared alert store — thread-safe ring buffer
+/// Thread-safe ring buffer of alerts for the API.
+///
+/// Backed by a `VecDeque` with a fixed maximum capacity. When full, the oldest
+/// alert is dropped. Provides severity/source counts for the security posture endpoint.
 pub struct AlertRingBuffer {
     buf: VecDeque<Alert>,
     max: usize,
@@ -61,8 +74,10 @@ impl AlertRingBuffer {
     }
 }
 
+/// Thread-safe shared alert store, used by the aggregator and API server.
 pub type SharedAlertStore = Arc<Mutex<AlertRingBuffer>>;
 
+/// Create a new shared alert store with the given maximum capacity.
 pub fn new_shared_store(max: usize) -> SharedAlertStore {
     Arc::new(Mutex::new(AlertRingBuffer::new(max)))
 }
@@ -205,6 +220,9 @@ async fn handle(
     Ok(resp)
 }
 
+/// Start the HTTP API server on the given bind address and port.
+///
+/// Runs indefinitely, serving requests against the shared alert store.
 pub async fn run_api_server(bind: &str, port: u16, store: SharedAlertStore) -> anyhow::Result<()> {
     let addr: SocketAddr = format!("{}:{}", bind, port).parse()?;
     let start_time = Instant::now();

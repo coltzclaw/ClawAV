@@ -1,3 +1,12 @@
+//! Audit log tampering detection.
+//!
+//! Monitors the audit log file for three indicators of evidence destruction:
+//! - **Missing**: file no longer exists
+//! - **Replaced**: inode changed (file was recreated), distinguishing log rotation
+//! - **Truncated**: file size decreased
+//!
+//! Also provides a scanner function to check log file permissions.
+
 use std::path::{Path, PathBuf};
 use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};

@@ -1,8 +1,22 @@
+//! Configuration loading and serialization.
+//!
+//! Defines the TOML configuration schema for ClawAV. The root [`Config`] struct
+//! contains sections for each subsystem (auditd, network, falco, samhain, proxy,
+//! policy, secureclaw, sentinel, etc.).
+//!
+//! All sections implement `Default` and `serde::Deserialize` with `#[serde(default)]`
+//! so missing fields gracefully fall back to sensible defaults. Config is loaded
+//! from `/etc/clawav/config.toml` by default.
+
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use crate::secureclaw::SecureClawConfig;
 
+/// Root configuration struct, deserialized from TOML.
+///
+/// All subsystem sections use `#[serde(default)]` so missing sections
+/// gracefully use defaults. Load with [`Config::load`], save with [`Config::save`].
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Config {
     pub general: GeneralConfig,
@@ -32,6 +46,7 @@ pub struct Config {
     pub auto_update: AutoUpdateConfig,
 }
 
+/// Auto-update configuration: checks GitHub releases periodically.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct AutoUpdateConfig {
     #[serde(default = "default_true")]
@@ -51,6 +66,7 @@ impl Default for AutoUpdateConfig {
     }
 }
 
+/// SSH login monitoring configuration.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct SshConfig {
     #[serde(default = "default_true")]
@@ -61,6 +77,7 @@ impl Default for SshConfig {
     fn default() -> Self { Self { enabled: true } }
 }
 
+/// YAML policy engine configuration.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct PolicyConfig {
     pub enabled: bool,
@@ -76,14 +93,20 @@ impl Default for PolicyConfig {
     }
 }
 
+/// General configuration: which users to monitor, alert level, log path.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct GeneralConfig {
-    pub watched_user: Option<String>,  // Keep for backward compat
+    /// Single watched user (backward compat, prefer `watched_users`)
+    pub watched_user: Option<String>,
+    /// List of UIDs to monitor; empty + watch_all_users=false means watch all
     #[serde(default)]
     pub watched_users: Vec<String>,
+    /// If true, monitor all users regardless of watched_users
     #[serde(default)]
     pub watch_all_users: bool,
+    /// Minimum severity for alerts ("info", "warning", "critical")
     pub min_alert_level: String,
+    /// Path to ClawAV's own log file
     pub log_file: String,
 }
 
@@ -107,13 +130,19 @@ impl GeneralConfig {
     }
 }
 
+/// Slack notification configuration.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct SlackConfig {
+    /// Explicitly enable/disable Slack (None = enabled if webhook_url is set)
     pub enabled: Option<bool>,
+    /// Primary incoming webhook URL
     pub webhook_url: String,
+    /// Failover webhook URL if primary fails
     #[serde(default)]
     pub backup_webhook_url: String,
+    /// Slack channel name
     pub channel: String,
+    /// Minimum severity to forward to Slack
     pub min_slack_level: String,
     /// Interval in seconds for periodic health heartbeat to Slack (0 = disabled)
     #[serde(default = "default_heartbeat_interval")]
@@ -124,12 +153,14 @@ fn default_heartbeat_interval() -> u64 {
     3600
 }
 
+/// Auditd log monitoring configuration.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct AuditdConfig {
     pub log_path: String,
     pub enabled: bool,
 }
 
+/// Network (iptables/netfilter) log monitoring configuration.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct NetworkConfig {
     pub log_path: String,
@@ -149,6 +180,7 @@ fn default_network_source() -> String {
     "auto".to_string()
 }
 
+/// Default CIDR ranges that are never alerted on (RFC1918, multicast, loopback).
 pub fn default_allowlisted_cidrs() -> Vec<String> {
     vec![
         "192.168.0.0/16".to_string(),
@@ -160,10 +192,12 @@ pub fn default_allowlisted_cidrs() -> Vec<String> {
     ]
 }
 
+/// Default ports that are never alerted on (HTTPS, DNS, NTP, mDNS).
 pub fn default_allowlisted_ports() -> Vec<u16> {
     vec![443, 53, 123, 5353]
 }
 
+/// Falco eBPF integration configuration.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct FalcoConfig {
     pub enabled: bool,
@@ -179,6 +213,7 @@ impl Default for FalcoConfig {
     }
 }
 
+/// Samhain file integrity monitoring integration configuration.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct SamhainConfig {
     pub enabled: bool,
@@ -194,11 +229,14 @@ impl Default for SamhainConfig {
     }
 }
 
+/// Periodic security scanner configuration.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ScansConfig {
+    /// Interval between scan cycles in seconds
     pub interval: u64,
 }
 
+/// HTTP REST API server configuration.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ApiConfig {
     pub enabled: bool,
@@ -216,6 +254,7 @@ impl Default for ApiConfig {
     }
 }
 
+/// API key vault proxy configuration.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ProxyConfig {
     pub enabled: bool,
@@ -239,6 +278,7 @@ impl Default for ProxyConfig {
     }
 }
 
+/// Maps a virtual API key to a real key for a specific provider/upstream.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct KeyMapping {
     #[serde(alias = "virtual")]
@@ -248,12 +288,14 @@ pub struct KeyMapping {
     pub upstream: String,
 }
 
+/// Data Loss Prevention pattern configuration for the proxy.
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 pub struct DlpConfig {
     #[serde(default)]
     pub patterns: Vec<DlpPattern>,
 }
 
+/// A single DLP regex pattern with a name and action (block or redact).
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct DlpPattern {
     pub name: String,
@@ -261,6 +303,7 @@ pub struct DlpPattern {
     pub action: String,
 }
 
+/// Network policy (allowlist/blocklist) configuration.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct NetPolicyConfig {
     pub enabled: bool,
@@ -290,6 +333,7 @@ impl Default for NetPolicyConfig {
     }
 }
 
+/// Real-time file sentinel configuration.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct SentinelConfig {
     #[serde(default = "default_sentinel_enabled")]
@@ -308,6 +352,7 @@ pub struct SentinelConfig {
     pub max_file_size_kb: u64,
 }
 
+/// A single path to watch with its glob patterns and policy.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct WatchPathConfig {
     pub path: String,
@@ -315,6 +360,8 @@ pub struct WatchPathConfig {
     pub policy: WatchPolicy,
 }
 
+/// Policy for a watched path: Protected files are quarantined+restored on change;
+/// Watched files are allowed to change with shadow updates.
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum WatchPolicy {

@@ -1,3 +1,31 @@
+//! ClawAV — Tamper-proof security watchdog for AI agents.
+//!
+//! This is the main entry point. It handles CLI argument parsing, privilege escalation
+//! via `sudo`, and orchestrates the async runtime that spawns all monitoring subsystems:
+//!
+//! - **auditd**: Tails the Linux audit log for syscall-level events
+//! - **behavior**: Classifies audit events against known attack patterns
+//! - **policy**: Evaluates events against user-defined YAML policy rules
+//! - **secureclaw**: Matches commands against vendor threat pattern databases
+//! - **network/journald**: Monitors iptables/firewall log entries
+//! - **falco/samhain**: Integrates with external security tools
+//! - **sentinel**: Real-time file integrity monitoring with quarantine/restore
+//! - **cognitive**: Monitors AI identity files (SOUL.md, AGENTS.md, etc.)
+//! - **scanner**: Periodic security posture scans (30+ checks)
+//! - **firewall**: Detects UFW rule changes and disablement
+//! - **logtamper**: Detects audit log truncation/replacement
+//! - **proxy**: API key vault proxy with DLP scanning
+//! - **aggregator**: Deduplicates and rate-limits alerts before delivery
+//! - **api**: HTTP API for external integrations
+//! - **slack**: Forwards high-severity alerts to Slack
+//! - **tui**: Terminal dashboard with config editor
+//! - **admin**: Unix socket for authenticated admin commands
+//! - **audit_chain**: Hash-chained tamper-evident alert log
+//! - **update**: Self-update from GitHub releases with Ed25519 verification
+//!
+//! The architecture is a channel pipeline:
+//! Sources → raw_tx → Aggregator → alert_tx → TUI/headless + slack_tx → Slack
+
 mod admin;
 mod alerts;
 mod aggregator;

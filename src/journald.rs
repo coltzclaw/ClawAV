@@ -1,3 +1,12 @@
+//! Journald-based log monitoring for network and SSH events.
+//!
+//! Provides two async tail functions:
+//! - [`tail_journald_network`]: Tails kernel messages (`journalctl -k`) for iptables
+//!   log entries matching a configured prefix.
+//! - [`tail_journald_ssh`]: Tails `ssh`/`sshd` unit logs for login successes and failures.
+//!
+//! Falls back to file-based monitoring when journald is unavailable.
+
 use anyhow::{Context, Result};
 use serde_json::Value;
 use std::process::Stdio;

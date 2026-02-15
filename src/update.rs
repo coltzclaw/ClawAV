@@ -265,7 +265,11 @@ fn get_target_version(args: &[String]) -> Option<String> {
     None
 }
 
-/// Main entry point for `clawav update`
+/// Main entry point for `clawav update`.
+///
+/// Supports `--check` (dry run), `--version <ver>` (specific release),
+/// `--binary <path>` (custom binary requiring admin key), and `--key <key>`.
+/// GitHub release path uses SHA-256 + optional Ed25519 signature verification.
 pub fn run_update(args: &[String]) -> Result<()> {
     let current_version = env!("CARGO_PKG_VERSION");
     eprintln!("🛡️  ClawAV Self-Update");
@@ -387,8 +391,10 @@ pub fn run_update(args: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// Compare version strings: returns true if remote is newer than current.
-/// Strips leading 'v' and compares semver components numerically.
+/// Compare semver strings: returns true if `remote` is strictly newer than `current`.
+///
+/// Strips leading 'v' and compares each `.`-delimited component numerically.
+/// Missing components are treated as 0.
 pub fn is_newer_version(current: &str, remote: &str) -> bool {
     let current = current.strip_prefix('v').unwrap_or(current);
     let remote = remote.strip_prefix('v').unwrap_or(remote);
@@ -410,6 +416,10 @@ pub fn is_newer_version(current: &str, remote: &str) -> bool {
 }
 
 /// Background auto-updater loop. Checks GitHub for new releases and installs them.
+///
+/// Runs forever, sleeping for `interval_secs` between checks. On finding a newer
+/// release with a valid checksum (and optional Ed25519 signature), downloads and
+/// replaces the binary, notifies Slack, and restarts the systemd service.
 pub async fn run_auto_updater(alert_tx: mpsc::Sender<Alert>, interval_secs: u64) {
     loop {
         tokio::time::sleep(Duration::from_secs(interval_secs)).await;

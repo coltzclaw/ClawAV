@@ -1,3 +1,17 @@
+//! Terminal User Interface (TUI) dashboard.
+//!
+//! Provides a tabbed dashboard using ratatui/crossterm with panels for:
+//! - **Alerts**: Real-time alert feed with color-coded severity
+//! - **Network**: Filtered network activity alerts
+//! - **Falco**: Filtered Falco eBPF alerts
+//! - **FIM**: Filtered Samhain file integrity alerts
+//! - **System**: Status summary with alert counts
+//! - **Config**: Interactive config editor with section sidebar
+//!
+//! The config editor supports in-place editing of all config fields, bool toggling,
+//! sudo-authenticated saves (chattr dance), and action buttons for installing
+//! optional tools (Falco, Samhain).
+
 use anyhow::Result;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
@@ -47,6 +61,10 @@ pub enum FieldType {
     Action(String), // Action command to run on Enter
 }
 
+/// Main TUI application state.
+///
+/// Holds the alert store, tab selection, config editor state, and sudo popup state.
+/// Updated by `on_key()` handlers and rendered by the `ui()` function.
 pub struct App {
     pub alert_store: AlertStore,
     pub selected_tab: usize,
@@ -1072,6 +1090,9 @@ fn render_sudo_popup(f: &mut Frame, area: Rect, popup: &SudoPopup) {
     f.render_widget(paragraph, popup_area);
 }
 
+/// Run the TUI dashboard, blocking until the user quits.
+///
+/// Drains alerts from the channel, renders the UI at 10fps, and handles keyboard input.
 pub async fn run_tui(mut alert_rx: mpsc::Receiver<Alert>, config_path: Option<PathBuf>) -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();

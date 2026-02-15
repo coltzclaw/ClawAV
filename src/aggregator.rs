@@ -1,3 +1,10 @@
+//! Alert aggregator: deduplication and per-source rate limiting.
+//!
+//! Sits between raw alert sources and consumers (TUI, Slack, API).
+//! Uses fuzzy dedup (digits replaced with "#") so alerts differing only in
+//! PIDs or counts share the same shape. Critical alerts bypass most filtering.
+//! Also handles JSONL logging, audit chain appending, and log rotation.
+
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;

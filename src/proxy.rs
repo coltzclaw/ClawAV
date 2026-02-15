@@ -1,3 +1,12 @@
+//! API key vault proxy with DLP (Data Loss Prevention) scanning.
+//!
+//! Provides a reverse proxy that maps virtual API keys to real ones, preventing
+//! the AI agent from ever seeing actual credentials. Supports Anthropic (x-api-key)
+//! and OpenAI (Bearer token) auth styles.
+//!
+//! Outbound request bodies are scanned against configurable DLP regex patterns.
+//! Matches can trigger blocking (SSN, AWS keys) or redaction (credit cards).
+
 use crate::alerts::{Alert, Severity};
 use crate::config::{KeyMapping, ProxyConfig};
 use anyhow::Result;
@@ -20,6 +29,7 @@ pub(crate) struct CompiledDlpPattern {
     action: String,
 }
 
+/// HTTP reverse proxy server that swaps virtual keys for real ones and scans for DLP violations.
 pub struct ProxyServer {
     config: ProxyConfig,
     alert_tx: mpsc::Sender<Alert>,
@@ -131,6 +141,7 @@ pub fn scan_dlp(
     }
 }
 
+/// Result of DLP scanning: either blocked or passed (with possible redactions).
 pub enum DlpResult {
     Blocked { pattern_name: String },
     Pass {

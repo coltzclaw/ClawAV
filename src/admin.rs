@@ -1,3 +1,14 @@
+//! Admin socket and key management for authenticated ClawAV control.
+//!
+//! Provides a Unix domain socket (`/var/run/clawav/admin.sock`) that accepts
+//! JSON commands authenticated with an Argon2-hashed admin key. On first run,
+//! a 256-bit key is generated and displayed once — the hash is stored, the key
+//! is never persisted.
+//!
+//! Supported commands: `status`, `scan`, `pause`, `config-update`.
+//! Failed auth triggers rate limiting (3 failures → 1-hour lockout) and
+//! Critical-severity alerts.
+
 use anyhow::{Context, Result};
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
@@ -20,18 +31,26 @@ const MAX_FAILURES: u32 = 3;
 const LOCKOUT_DURATION: Duration = Duration::from_secs(3600); // 1 hour
 const MAX_PAUSE_MINUTES: u64 = 30;
 
+/// JSON request sent by clients over the admin socket.
 #[derive(Debug, Deserialize)]
 pub struct AdminRequest {
+    /// The admin key for authentication
     pub key: String,
+    /// Command to execute (status, scan, pause, config-update)
     pub command: String,
+    /// Optional command-specific arguments
     #[serde(default)]
     pub args: serde_json::Value,
 }
 
+/// JSON response returned over the admin socket.
 #[derive(Debug, Serialize)]
 pub struct AdminResponse {
+    /// Whether the command succeeded
     pub ok: bool,
+    /// Human-readable status message
     pub message: String,
+    /// Optional structured data (e.g., status details)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<serde_json::Value>,
 }
@@ -77,6 +96,11 @@ impl RateLimiter {
     }
 }
 
+/// Listens on a Unix domain socket for authenticated admin commands.
+///
+/// Each connection reads newline-delimited JSON requests, verifies the admin key
+/// against the stored Argon2 hash, and dispatches commands. Rate limiting prevents
+/// brute-force key guessing.
 pub struct AdminSocket {
     socket_path: PathBuf,
     key_hash_path: PathBuf,

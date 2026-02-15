@@ -1,3 +1,9 @@
+//! UFW firewall state monitor.
+//!
+//! Captures a baseline of `ufw status verbose` on startup, then polls every 30
+//! seconds for changes. Any rule modification or firewall disablement triggers
+//! a Critical alert with a diff of the changes.
+
 use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
 use std::process::Command;

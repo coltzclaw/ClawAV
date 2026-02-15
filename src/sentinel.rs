@@ -1,3 +1,13 @@
+//! Real-time file integrity sentinel with quarantine and restore.
+//!
+//! Uses `notify` (inotify on Linux) to watch configured file paths for changes.
+//! Each watched file has a shadow copy for diff generation. When a protected file
+//! is modified, the change is quarantined and the original is restored from shadow.
+//! Watched (non-protected) files are allowed to change — shadow is updated instead.
+//!
+//! Optionally scans file content against SecureClaw patterns to detect threats
+//! injected into watched files.
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -101,6 +111,10 @@ fn policy_for_path(config: &SentinelConfig, path: &str) -> Option<WatchPolicy> {
     None
 }
 
+/// Real-time file integrity monitor using inotify.
+///
+/// Watches configured paths, compares changes against shadow copies, and either
+/// quarantines+restores (protected files) or updates shadows (watched files).
 pub struct Sentinel {
     config: SentinelConfig,
     alert_tx: mpsc::Sender<Alert>,

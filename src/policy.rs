@@ -1,3 +1,13 @@
+//! User-configurable YAML policy engine.
+//!
+//! Loads policy rules from `.yaml`/`.yml` files in configured directories. Each rule
+//! specifies match criteria (exact command, substring, file glob) and an action
+//! (critical, warning, info). Rules with `enforcement` fields are skipped in the
+//! detection pipeline (reserved for clawsudo).
+//!
+//! When multiple rules match, the highest-severity verdict wins. Exclude args
+//! provide allowlisting (e.g., curl to api.anthropic.com).
+
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -6,7 +16,10 @@ use serde::Deserialize;
 use crate::alerts::Severity;
 use crate::auditd::ParsedEvent;
 
-/// A single policy rule loaded from YAML
+/// A single policy rule loaded from a YAML file.
+///
+/// Rules match against commands, substrings, or file access globs, and specify
+/// an action (critical/warning/info). Rules with `enforcement` are reserved for clawsudo.
 #[derive(Debug, Clone, Deserialize)]
 pub struct PolicyRule {
     pub name: String,
@@ -20,7 +33,7 @@ pub struct PolicyRule {
     pub enforcement: Option<String>,
 }
 
-/// Match specification within a rule
+/// Match criteria within a policy rule.
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct MatchSpec {
     /// Exact binary name matches (basename)
@@ -37,7 +50,9 @@ pub struct MatchSpec {
     pub exclude_args: Vec<String>,
 }
 
-/// Result of a policy evaluation
+/// Result of evaluating an event against all policy rules.
+///
+/// Contains the matching rule name, its description, action, and derived severity.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PolicyVerdict {
     pub rule_name: String,
@@ -53,7 +68,9 @@ struct PolicyFile {
     rules: Vec<PolicyRule>,
 }
 
-/// The policy engine: loads rules from YAML files and evaluates events against them.
+/// YAML policy engine: loads rules from files and evaluates audit events against them.
+///
+/// Skips clawsudo enforcement rules and returns the highest-severity matching verdict.
 #[derive(Debug, Clone)]
 pub struct PolicyEngine {
     rules: Vec<PolicyRule>,

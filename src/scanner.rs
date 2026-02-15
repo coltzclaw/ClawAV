@@ -1,3 +1,23 @@
+//! Periodic security posture scanner.
+//!
+//! Runs 30+ security checks on a configurable interval, producing [`ScanResult`]
+//! values that are converted to alerts for non-passing checks. Checks include:
+//!
+//! - Firewall status and rules (UFW)
+//! - Auditd status and immutability
+//! - Binary/config integrity (SHA-256 checksums)
+//! - Immutable file flags (chattr +i)
+//! - AppArmor profile status
+//! - SecureClaw pattern database freshness
+//! - Audit log health and permissions
+//! - Crontab audit, world-writable files, SUID/SGID binaries
+//! - Kernel modules, Docker security, password policy
+//! - DNS resolver, NTP sync, failed logins, zombie processes
+//! - Environment variables, package integrity, core dump settings
+//! - Network interfaces, systemd hardening, user account audit
+//! - Cognitive file integrity (AI identity files)
+//! - OpenClaw-specific checks (gateway exposure, auth, filesystem scope)
+
 use chrono::{DateTime, Local};
 use serde::Serialize;
 use std::process::Command;
@@ -8,6 +28,7 @@ use tokio::time::{sleep, Duration};
 use crate::alerts::{Alert, Severity};
 use crate::cognitive::scan_cognitive_integrity;
 
+/// Result status of a single security scan check.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum ScanStatus {
     Pass,
@@ -25,11 +46,18 @@ impl std::fmt::Display for ScanStatus {
     }
 }
 
+/// Result of a single security posture check.
+///
+/// Pass results are silently recorded; Warn and Fail are converted to alerts.
 #[derive(Debug, Clone, Serialize)]
 pub struct ScanResult {
+    /// Check category (e.g., "firewall", "auditd", "suid_sgid")
     pub category: String,
+    /// Whether the check passed, warned, or failed
     pub status: ScanStatus,
+    /// Human-readable description of findings
     pub details: String,
+    /// When the scan was performed
     pub timestamp: DateTime<Local>,
 }
 
@@ -60,8 +88,10 @@ impl ScanResult {
     }
 }
 
+/// Thread-safe shared scan results, updated by the periodic scanner.
 pub type SharedScanResults = Arc<Mutex<Vec<ScanResult>>>;
 
+/// Create a new empty shared scan results store.
 pub fn new_shared_scan_results() -> SharedScanResults {
     Arc::new(Mutex::new(Vec::new()))
 }
@@ -1185,6 +1215,7 @@ pub fn parse_disk_usage(output: &str) -> ScanResult {
     ScanResult::new("resources", ScanStatus::Warn, "Cannot parse disk usage")
 }
 
+/// Static entry point for running all security scans.
 pub struct SecurityScanner;
 
 /// Check that immutable (chattr +i) flags are set on critical ClawAV files

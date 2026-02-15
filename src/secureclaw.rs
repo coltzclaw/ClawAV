@@ -1,10 +1,21 @@
+//! SecureClaw vendor threat pattern engine.
+//!
+//! Loads and compiles regex pattern databases from JSON files in a vendor directory:
+//! - `injection-patterns.json`: prompt injection and code injection patterns
+//! - `dangerous-commands.json`: categorized dangerous command patterns with severity
+//! - `privacy-rules.json`: PII/credential detection patterns
+//! - `supply-chain-ioc.json`: suspicious skill patterns and ClawHavoc C2 indicators
+//!
+//! Provides `check_command()` with a comprehensive sudo allowlist to reduce false
+//! positives on legitimate system administration commands.
+
 use anyhow::{Context, Result};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
-/// Root config pointing to the secureclaw vendor directory
+/// Configuration pointing to the SecureClaw vendor pattern directory.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct SecureClawConfig {
     pub enabled: bool,
@@ -25,7 +36,10 @@ impl Default for SecureClawConfig {
     }
 }
 
-/// Loaded and compiled pattern databases
+/// Loaded and compiled pattern databases from SecureClaw vendor JSON files.
+///
+/// Contains four databases: injection patterns, dangerous commands, privacy rules,
+/// and supply chain IOCs. Each pattern is compiled to a [`Regex`] at load time.
 pub struct SecureClawEngine {
     pub injection_patterns: Vec<CompiledPattern>,
     pub dangerous_commands: Vec<CompiledPattern>,
@@ -33,6 +47,7 @@ pub struct SecureClawEngine {
     pub supply_chain_iocs: Vec<CompiledPattern>,
 }
 
+/// A single compiled regex pattern with metadata.
 pub struct CompiledPattern {
     pub name: String,
     pub category: String,

@@ -1,3 +1,15 @@
+//! Cognitive file integrity monitoring for AI agent identity files.
+//!
+//! Maintains SHA-256 baselines of critical workspace files (SOUL.md, AGENTS.md,
+//! IDENTITY.md, TOOLS.md, etc.) and checks for unauthorized modifications.
+//!
+//! Files are classified as either:
+//! - **Protected**: modifications trigger Critical alerts (identity tampering)
+//! - **Watched**: modifications are logged as Info with diffs, then auto-rebaselined
+//!
+//! Shadow copies in `/etc/clawav/cognitive-shadow/` enable unified diff generation
+//! for watched file changes.
+
 use anyhow::Result;
 use sha2::{Sha256, Digest};
 use std::collections::HashMap;
@@ -20,7 +32,10 @@ const WATCHED_FILES: &[&str] = &[
     "MEMORY.md",
 ];
 
-/// Stores SHA-256 baselines for cognitive files
+/// SHA-256 baseline store for cognitive identity files.
+///
+/// Tracks the expected hash of each protected and watched file. Baselines
+/// can be saved to/loaded from a file for persistence across restarts.
 pub struct CognitiveBaseline {
     baselines: HashMap<PathBuf, String>,
     workspace_dir: PathBuf,
@@ -162,6 +177,7 @@ impl CognitiveBaseline {
     }
 }
 
+/// Alert from the cognitive integrity checker.
 #[derive(Debug, Clone)]
 pub struct CognitiveAlert {
     pub file: PathBuf,
@@ -170,6 +186,7 @@ pub struct CognitiveAlert {
     pub watched: bool,
 }
 
+/// What kind of change was detected on a cognitive file.
 #[derive(Debug, Clone)]
 pub enum CognitiveAlertKind {
     Modified { diff: Option<String> },
@@ -276,7 +293,11 @@ fn save_shadow(path: &Path) {
     }
 }
 
-/// Scanner integration: check cognitive file integrity
+/// Scanner integration: check cognitive file integrity against baselines.
+///
+/// Creates baselines on first run, then checks for modifications, deletions,
+/// and new files. Protected file changes are CRIT; watched file changes are WARN
+/// with auto-rebaseline.
 pub fn scan_cognitive_integrity(workspace_dir: &Path, baseline_path: &Path, secureclaw: Option<&crate::secureclaw::SecureClawEngine>) -> Vec<ScanResult> {
     // If no baseline exists yet, create one and save shadows
     if !baseline_path.exists() {

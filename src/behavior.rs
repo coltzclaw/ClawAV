@@ -1,9 +1,25 @@
+//! Hardcoded behavioral threat detection engine.
+//!
+//! Classifies parsed audit events against ~200 static patterns organized into
+//! categories: data exfiltration, privilege escalation, security tampering,
+//! reconnaissance, and side-channel attacks.
+//!
+//! Patterns include network exfil tools, DNS tunneling, container escapes,
+//! LD_PRELOAD bypasses, SSH key injection, history tampering, log clearing,
+//! binary replacement, and more. Build-tool child processes (cargo, gcc, etc.)
+//! are allowlisted to reduce false positives.
+//!
+//! This is the "hardcoded" detection layer — for user-configurable rules,
+//! see the [`policy`] module.
+
 use std::fmt;
 
 use crate::alerts::Severity;
 use crate::auditd::{Actor, ParsedEvent};
 
-/// Categories of suspicious behavior
+/// Categories of suspicious behavior detected by the hardcoded rules engine.
+///
+/// Each category maps to a class of attack technique (MITRE ATT&CK inspired).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BehaviorCategory {
     DataExfiltration,

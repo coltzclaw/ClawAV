@@ -1,3 +1,11 @@
+//! Network log parser for iptables/netfilter entries.
+//!
+//! Parses iptables log lines from syslog or kernel messages, extracting SRC, DST,
+//! DPT, and PROTO fields. Uses a configurable [`NetworkAllowlist`] of CIDR ranges
+//! and ports to classify traffic as known-good (Info) or suspicious (Warning).
+//!
+//! Default allowlist includes RFC1918 ranges, multicast, and common ports (443, 53, 123).
+
 use anyhow::Result;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::net::IpAddr;
@@ -48,6 +56,7 @@ fn is_known_good_destination(dst: &str, dpt: &str) -> bool {
     allowlist.is_allowed(dst, dpt)
 }
 
+/// CIDR and port-based allowlist for classifying network traffic.
 pub struct NetworkAllowlist {
     cidrs: Vec<IpNet>,
     ports: Vec<u16>,

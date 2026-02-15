@@ -1,3 +1,13 @@
+//! Network policy enforcement engine.
+//!
+//! Evaluates outbound connections against an allowlist or blocklist of hosts/ports.
+//! Supports wildcard suffix matching (e.g., `*.anthropic.com`). Can scan command
+//! strings for embedded URLs and validate them against the policy.
+//!
+//! Operates in two modes:
+//! - **allowlist**: only explicitly allowed hosts pass; everything else is blocked
+//! - **blocklist**: only explicitly blocked hosts are flagged; everything else passes
+
 use std::collections::HashSet;
 
 use crate::alerts::{Alert, Severity};
