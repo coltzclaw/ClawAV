@@ -203,8 +203,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "clawav"
-version = "0.3.0-t2"
+name = "clawtower"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "argon2",

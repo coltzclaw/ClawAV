@@ -254,8 +254,8 @@ This allows OpenClaw to write to MEMORY.md normally (auto-approved) while blocki
 
 | Milestone | Action |
 |-----------|--------|
-| After Tier 1 | Tag v0.3.0-t1, rebuild, install, run Red Lobster v2 |
-| After Tier 2 | Tag v0.3.0-t2, rebuild, install, run Red Lobster v3 |
-| After Tier 3 | Tag v0.3.0, rebuild, install, run Red Lobster v4 (final) |
+| After Tier 1 | Tag v0.3.1, rebuild, install, run Red Lobster v2 |
+| After Tier 2 | Tag v0.3.1, rebuild, install, run Red Lobster v3 |
+| After Tier 3 | Tag v0.3.1, rebuild, install, run Red Lobster v4 (final) |
 
 **Target: 6/6 flags defended by Red Lobster v4.**

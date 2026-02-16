@@ -231,8 +231,8 @@ git remote set-url origin git@github.com:coltz108/ClawTower.git
 
 ```bash
 git push origin main
-git tag v0.3.0
-git push origin v0.3.0
+git tag v0.3.1
+git push origin v0.3.1
 ```
 
 **Step 4: Rename local project directory**
@@ -289,7 +289,7 @@ systemctl status clawtower  # should say not found
 
 **Step 6: Install ClawTower**
 
-Build and install from the renamed repo, or wait for the v0.3.0 GitHub release to use oneshot-install.
+Build and install from the renamed repo, or wait for the v0.3.1 GitHub release to use oneshot-install.
 
 ---
 

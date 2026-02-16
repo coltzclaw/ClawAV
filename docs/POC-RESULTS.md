@@ -1,7 +1,7 @@
 # POC Attack Simulation Results
 
 **Date:** 2026-02-16  
-**Platform:** Raspberry Pi 5 (arm64), ClawTower v0.2.8  
+**Platform:** Raspberry Pi 5 (arm64), ClawTower v0.3.1  
 **Scorecard:** 9/10 attacks detected
 
 ---

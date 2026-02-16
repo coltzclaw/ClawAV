@@ -45,10 +45,10 @@
 5. Update Cargo.toml (crate name, binary names)
 6. Build + test
 7. Single commit: `chore: rename ClawTower → ClawTower`
-8. Tag v0.3.0
+8. Tag v0.3.1
 9. Uninstall old ClawTower on Pi (step-by-step checklist)
 10. Fresh install as ClawTower
 
 ## Versioning
-- v0.3.0 — this rename
+- v0.3.1 — this rename
 - v0.4.0 — first public release
