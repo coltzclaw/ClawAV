@@ -26,12 +26,19 @@ pub struct PolicyRule {
     #[serde(default)]
     pub description: String,
     #[serde(rename = "match")]
+    #[serde(default)]
     pub match_spec: MatchSpec,
+    #[serde(default = "default_action")]
     pub action: String,
     /// If set (allow/deny), this is a clawsudo enforcement rule — skip in detection-only pipeline
     #[serde(default)]
     pub enforcement: Option<String>,
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
 }
+
+fn default_enabled() -> bool { true }
+fn default_action() -> String { "critical".to_string() }
 
 /// Match criteria within a policy rule.
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -63,7 +70,7 @@ pub struct PolicyVerdict {
 
 /// Top-level YAML structure
 #[derive(Debug, Deserialize)]
-struct PolicyFile {
+pub(crate) struct PolicyFile {
     #[serde(default)]
     rules: Vec<PolicyRule>,
 }
@@ -99,40 +106,71 @@ impl PolicyEngine {
         Self { rules: Vec::new() }
     }
 
+    /// Merge override rules onto base rules by name.
+    /// Same name = override replaces base. New names = appended.
+    /// Disabled rules (enabled: false) are filtered out.
+    pub fn merge_rules(base: Vec<PolicyRule>, overrides: Vec<PolicyRule>) -> Vec<PolicyRule> {
+        let mut merged = base;
+        for override_rule in overrides {
+            if let Some(pos) = merged.iter().position(|r| r.name == override_rule.name) {
+                merged[pos] = override_rule;
+            } else {
+                merged.push(override_rule);
+            }
+        }
+        merged.retain(|r| r.enabled);
+        merged
+    }
+
     /// Load all .yaml/.yml files from a directory
     pub fn load(dir: &Path) -> Result<Self> {
-        let mut rules = Vec::new();
-
         if !dir.exists() {
-            return Ok(Self { rules });
+            return Ok(Self { rules: Vec::new() });
         }
 
         let entries = std::fs::read_dir(dir)
             .with_context(|| format!("Failed to read policy dir: {}", dir.display()))?;
 
-        for entry in entries {
-            let entry = entry?;
-            let path = entry.path();
-            match path.extension().and_then(|e| e.to_str()) {
-                Some("yaml") | Some("yml") => {
-                    // Skip clawsudo policies — those are compiled into the clawsudo binary
-                    // and should NOT be evaluated in the auditd monitoring pipeline
-                    if let Some(fname) = path.file_name().and_then(|f| f.to_str()) {
-                        if fname.starts_with("clawsudo") {
-                            continue;
-                        }
+        let mut files: Vec<_> = entries
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                let path = e.path();
+                match path.extension().and_then(|ext| ext.to_str()) {
+                    Some("yaml") | Some("yml") => {
+                        !path.file_name()
+                            .and_then(|f| f.to_str())
+                            .map(|f| f.starts_with("clawsudo"))
+                            .unwrap_or(false)
                     }
-                    let content = std::fs::read_to_string(&path)
-                        .with_context(|| format!("Failed to read {}", path.display()))?;
-                    let pf: PolicyFile = serde_yaml::from_str(&content)
-                        .with_context(|| format!("Failed to parse {}", path.display()))?;
-                    rules.extend(pf.rules);
+                    _ => false,
                 }
-                _ => {}
+            })
+            .collect();
+
+        // Sort: default.yaml first, then alphabetical
+        files.sort_by(|a, b| {
+            let a_name = a.file_name();
+            let b_name = b.file_name();
+            let a_is_default = a_name.to_str().map(|s| s.starts_with("default")).unwrap_or(false);
+            let b_is_default = b_name.to_str().map(|s| s.starts_with("default")).unwrap_or(false);
+            match (a_is_default, b_is_default) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                _ => a_name.cmp(&b_name),
             }
+        });
+
+        let mut all_rules: Vec<PolicyRule> = Vec::new();
+        for entry in files {
+            let path = entry.path();
+            let content = std::fs::read_to_string(&path)
+                .with_context(|| format!("Failed to read {}", path.display()))?;
+            let pf: PolicyFile = serde_yaml::from_str(&content)
+                .with_context(|| format!("Failed to parse {}", path.display()))?;
+            all_rules = Self::merge_rules(all_rules, pf.rules);
         }
 
-        Ok(Self { rules })
+        Ok(Self { rules: all_rules })
     }
 
     /// Load from multiple directories (first found wins, but all are loaded)
@@ -157,6 +195,9 @@ impl PolicyEngine {
         let mut best: Option<PolicyVerdict> = None;
 
         for rule in &self.rules {
+            if !rule.enabled {
+                continue;
+            }
             // Skip enforcement-only rules (clawsudo) in detection pipeline
             if rule.enforcement.is_some() {
                 continue;
@@ -409,5 +450,117 @@ rules:
     fn test_load_nonexistent_dir() {
         let engine = PolicyEngine::load(Path::new("/nonexistent/path")).unwrap();
         assert_eq!(engine.rule_count(), 0);
+    }
+
+    #[test]
+    fn test_enabled_false_disables_rule() {
+        let yaml = r#"
+rules:
+  - name: "test-rule"
+    description: "test"
+    match:
+      command: ["curl"]
+    action: critical
+    enabled: false
+"#;
+        let engine = load_from_str(yaml);
+        let event = make_exec_event(&["curl", "http://evil.com"]);
+        assert!(engine.evaluate(&event).is_none(), "Disabled rule should not match");
+    }
+
+    #[test]
+    fn test_name_based_override() {
+        let yaml_base = r#"
+rules:
+  - name: "exfil"
+    description: "base"
+    match:
+      command: ["curl"]
+      exclude_args: ["a.com"]
+    action: critical
+"#;
+        let yaml_override = r#"
+rules:
+  - name: "exfil"
+    description: "user override"
+    match:
+      command: ["curl"]
+      exclude_args: ["a.com", "b.com"]
+    action: warning
+"#;
+        let base_pf: PolicyFile = serde_yaml::from_str(yaml_base).unwrap();
+        let override_pf: PolicyFile = serde_yaml::from_str(yaml_override).unwrap();
+        let merged = PolicyEngine::merge_rules(base_pf.rules, override_pf.rules);
+        let engine = PolicyEngine { rules: merged };
+
+        assert_eq!(engine.rule_count(), 1);
+        assert_eq!(engine.rules[0].description, "user override");
+        assert_eq!(engine.rules[0].action, "warning");
+    }
+
+    #[test]
+    fn test_user_adds_new_rule() {
+        let yaml_base = r#"
+rules:
+  - name: "exfil"
+    description: "base"
+    match:
+      command: ["curl"]
+    action: critical
+"#;
+        let yaml_user = r#"
+rules:
+  - name: "my-custom-rule"
+    description: "custom"
+    match:
+      command: ["python3"]
+    action: warning
+"#;
+        let base_pf: PolicyFile = serde_yaml::from_str(yaml_base).unwrap();
+        let user_pf: PolicyFile = serde_yaml::from_str(yaml_user).unwrap();
+        let merged = PolicyEngine::merge_rules(base_pf.rules, user_pf.rules);
+        let engine = PolicyEngine { rules: merged };
+
+        assert_eq!(engine.rule_count(), 2);
+    }
+
+    #[test]
+    fn test_load_merges_multiple_files_by_name() {
+        let dir = tempfile::tempdir().unwrap();
+
+        std::fs::write(dir.path().join("default.yaml"), r#"
+rules:
+  - name: "exfil"
+    description: "base exfil"
+    match:
+      command: ["curl"]
+    action: critical
+  - name: "recon"
+    description: "base recon"
+    match:
+      command: ["whoami"]
+    action: warning
+"#).unwrap();
+
+        std::fs::write(dir.path().join("custom.yaml"), r#"
+rules:
+  - name: "exfil"
+    description: "user exfil"
+    match:
+      command: ["curl"]
+      exclude_args: ["mysite.com"]
+    action: critical
+  - name: "recon"
+    enabled: false
+"#).unwrap();
+
+        let engine = PolicyEngine::load(dir.path()).unwrap();
+
+        let event_curl = make_exec_event(&["curl", "http://evil.com"]);
+        let verdict = engine.evaluate(&event_curl).unwrap();
+        assert_eq!(verdict.description, "user exfil");
+
+        let event_whoami = make_exec_event(&["whoami"]);
+        assert!(engine.evaluate(&event_whoami).is_none(), "Recon should be disabled");
     }
 }
