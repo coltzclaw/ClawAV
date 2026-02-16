@@ -6,7 +6,7 @@ set -euo pipefail
 
 WATCHED_USER="openclaw"
 WATCHED_UID=$(id -u "$WATCHED_USER" 2>/dev/null || echo "")
-LOG_PREFIX="OPENCLAWTOWER_NET"
+LOG_PREFIX="OPENCLAWAV_NET"
 
 if [ -z "$WATCHED_UID" ]; then
     echo "ERROR: User '$WATCHED_USER' not found"
@@ -46,7 +46,7 @@ if [ "$FW_BACKEND" = "iptables" ]; then
 
 else
     # nftables backend
-    TABLE_NAME="clawtower"
+    TABLE_NAME="clawav"
     CHAIN_NAME="output_log"
 
     # Check if our table already exists

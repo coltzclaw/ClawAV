@@ -14,7 +14,7 @@ fn main() -> Result<()> {
             let resp = client
                 .get(format!("{BASE}/api/status"))
                 .send()
-                .context("failed to reach clawtower daemon")?;
+                .context("failed to reach clawav daemon")?;
             let body: serde_json::Value = resp.json().context("invalid JSON from daemon")?;
             println!("{}", serde_json::to_string_pretty(&body)?);
         }
@@ -22,7 +22,7 @@ fn main() -> Result<()> {
             let resp = client
                 .post(format!("{BASE}/api/pause/toggle"))
                 .send()
-                .context("failed to reach clawtower daemon")?;
+                .context("failed to reach clawav daemon")?;
             let body = resp.text().context("failed to read response")?;
             eprintln!("{body}");
         }
@@ -30,11 +30,11 @@ fn main() -> Result<()> {
             let _resp = client
                 .post(format!("{BASE}/api/shutdown"))
                 .send()
-                .context("failed to reach clawtower daemon")?;
+                .context("failed to reach clawav daemon")?;
             eprintln!("shutdown requested");
         }
         other => {
-            bail!("unknown command: {other:?}\nUsage: clawtower-ctl <status|toggle-pause|stop>");
+            bail!("unknown command: {other:?}\nUsage: clawav-ctl <status|toggle-pause|stop>");
         }
     }
 

@@ -565,44 +565,44 @@ rules:
     }
 
     #[test]
-    fn test_grep_clawtower_config_does_not_trigger_deny_write() {
-        // Regression: deny-clawtower-config-write must only fire on write-like commands
+    fn test_grep_clawav_config_does_not_trigger_deny_write() {
+        // Regression: deny-clawav-config-write must only fire on write-like commands
         // (sed -i, tee, vim, etc.), NOT on reads like grep/cat.
         let yaml = r#"
 rules:
-  - name: "deny-clawtower-config-write"
-    description: "Detect writes to ClawTower config files"
+  - name: "deny-clawav-config-write"
+    description: "Detect writes to ClawAV config files"
     match:
       command_contains:
-        - "sed -i /etc/clawtower/"
-        - "tee /etc/clawtower/"
-        - "vim /etc/clawtower/"
-        - "nano /etc/clawtower/"
-        - "vi /etc/clawtower/"
-        - "chattr -i /etc/clawtower/"
+        - "sed -i /etc/clawav/"
+        - "tee /etc/clawav/"
+        - "vim /etc/clawav/"
+        - "nano /etc/clawav/"
+        - "vi /etc/clawav/"
+        - "chattr -i /etc/clawav/"
     action: critical
 "#;
         let engine = load_from_str(yaml);
 
         // grep should NOT trigger
-        let grep_event = make_exec_event(&["grep", "pattern", "/etc/clawtower/config.toml"]);
+        let grep_event = make_exec_event(&["grep", "pattern", "/etc/clawav/config.toml"]);
         assert!(
             engine.evaluate(&grep_event).is_none(),
-            "grep /etc/clawtower/config.toml must not trigger deny-clawtower-config-write"
+            "grep /etc/clawav/config.toml must not trigger deny-clawav-config-write"
         );
 
         // cat should NOT trigger
-        let cat_event = make_exec_event(&["cat", "/etc/clawtower/config.toml"]);
+        let cat_event = make_exec_event(&["cat", "/etc/clawav/config.toml"]);
         assert!(
             engine.evaluate(&cat_event).is_none(),
-            "cat /etc/clawtower/config.toml must not trigger deny-clawtower-config-write"
+            "cat /etc/clawav/config.toml must not trigger deny-clawav-config-write"
         );
 
         // sed -i SHOULD trigger
-        let sed_event = make_exec_event(&["sed", "-i", "/etc/clawtower/config.toml"]);
+        let sed_event = make_exec_event(&["sed", "-i", "/etc/clawav/config.toml"]);
         assert!(
             engine.evaluate(&sed_event).is_some(),
-            "sed -i /etc/clawtower/ should trigger deny-clawtower-config-write"
+            "sed -i /etc/clawav/ should trigger deny-clawav-config-write"
         );
     }
 
@@ -1029,9 +1029,9 @@ rules:
     // ── deny-security-service-disable ───────────────────────────────
 
     #[test]
-    fn test_security_disable_clawtower() {
+    fn test_security_disable_clawav() {
         let e = load_full_policy();
-        let ev = make_exec_event(&["systemctl", "stop", "clawtower"]);
+        let ev = make_exec_event(&["systemctl", "stop", "clawav"]);
         let v = e.evaluate(&ev).unwrap();
         assert_eq!(v.rule_name, "deny-security-service-disable");
     }
@@ -1063,7 +1063,7 @@ rules:
     #[test]
     fn test_systemctl_status_not_flagged() {
         let e = load_full_policy();
-        let ev = make_exec_event(&["systemctl", "status", "clawtower"]);
+        let ev = make_exec_event(&["systemctl", "status", "clawav"]);
         let v = e.evaluate(&ev);
         assert!(v.is_none() || v.as_ref().unwrap().rule_name != "deny-security-service-disable");
     }
@@ -1076,12 +1076,12 @@ rules:
         assert!(v.is_none() || v.as_ref().unwrap().rule_name != "deny-security-service-disable");
     }
 
-    // ── deny-clawtower-tamper ──────────────────────────────────────────
+    // ── deny-clawav-tamper ──────────────────────────────────────────
 
     #[test]
     fn test_tamper_chattr_minus_i() {
         let e = load_full_policy();
-        let ev = make_exec_event(&["chattr", "-i", "/etc/clawtower/config.toml"]);
+        let ev = make_exec_event(&["chattr", "-i", "/etc/clawav/config.toml"]);
         let v = e.evaluate(&ev).unwrap();
         assert_eq!(v.severity, Severity::Critical);
     }
@@ -1103,25 +1103,25 @@ rules:
     }
 
     #[test]
-    fn test_tamper_rm_clawtower_binary() {
+    fn test_tamper_rm_clawav_binary() {
         let e = load_full_policy();
-        let ev = make_exec_event(&["rm", "/usr/local/bin/clawtower"]);
+        let ev = make_exec_event(&["rm", "/usr/local/bin/clawav"]);
         let v = e.evaluate(&ev).unwrap();
         assert_eq!(v.severity, Severity::Critical);
     }
 
     #[test]
-    fn test_tamper_rm_rf_etc_clawtower() {
+    fn test_tamper_rm_rf_etc_clawav() {
         let e = load_full_policy();
-        let ev = make_exec_event(&["rm", "-rf", "/etc/clawtower"]);
+        let ev = make_exec_event(&["rm", "-rf", "/etc/clawav"]);
         let v = e.evaluate(&ev).unwrap();
         assert_eq!(v.severity, Severity::Critical);
     }
 
     #[test]
-    fn test_tamper_systemctl_mask_clawtower() {
+    fn test_tamper_systemctl_mask_clawav() {
         let e = load_full_policy();
-        let ev = make_exec_event(&["systemctl", "mask", "clawtower"]);
+        let ev = make_exec_event(&["systemctl", "mask", "clawav"]);
         let v = e.evaluate(&ev).unwrap();
         assert_eq!(v.severity, Severity::Critical);
     }
@@ -1129,59 +1129,59 @@ rules:
     #[test]
     fn test_tamper_apparmor_parser_remove() {
         let e = load_full_policy();
-        let ev = make_exec_event(&["apparmor_parser", "-R", "/etc/apparmor.d/usr.bin.clawtower"]);
+        let ev = make_exec_event(&["apparmor_parser", "-R", "/etc/apparmor.d/usr.bin.clawav"]);
         let v = e.evaluate(&ev).unwrap();
         assert_eq!(v.severity, Severity::Critical);
     }
 
-    // ── deny-clawtower-config-write (additional) ───────────────────────
+    // ── deny-clawav-config-write (additional) ───────────────────────
 
     #[test]
     fn test_config_write_tee() {
         let e = load_full_policy();
-        let ev = make_exec_event(&["tee", "/etc/clawtower/config.toml"]);
+        let ev = make_exec_event(&["tee", "/etc/clawav/config.toml"]);
         let v = e.evaluate(&ev).unwrap();
-        assert_eq!(v.rule_name, "deny-clawtower-config-write");
+        assert_eq!(v.rule_name, "deny-clawav-config-write");
     }
 
     #[test]
     fn test_config_write_vim() {
         let e = load_full_policy();
-        let ev = make_exec_event(&["vim", "/etc/clawtower/policies.yaml"]);
+        let ev = make_exec_event(&["vim", "/etc/clawav/policies.yaml"]);
         let v = e.evaluate(&ev).unwrap();
-        assert_eq!(v.rule_name, "deny-clawtower-config-write");
+        assert_eq!(v.rule_name, "deny-clawav-config-write");
     }
 
     #[test]
     fn test_config_write_nano() {
         let e = load_full_policy();
-        let ev = make_exec_event(&["nano", "/etc/clawtower/admin.key"]);
+        let ev = make_exec_event(&["nano", "/etc/clawav/admin.key"]);
         let v = e.evaluate(&ev).unwrap();
-        assert_eq!(v.rule_name, "deny-clawtower-config-write");
+        assert_eq!(v.rule_name, "deny-clawav-config-write");
     }
 
     #[test]
     fn test_config_read_cat_not_flagged() {
         let e = load_full_policy();
-        let ev = make_exec_event(&["cat", "/etc/clawtower/config.toml"]);
+        let ev = make_exec_event(&["cat", "/etc/clawav/config.toml"]);
         let v = e.evaluate(&ev);
-        assert!(v.is_none() || v.as_ref().unwrap().rule_name != "deny-clawtower-config-write");
+        assert!(v.is_none() || v.as_ref().unwrap().rule_name != "deny-clawav-config-write");
     }
 
     #[test]
     fn test_config_read_less_not_flagged() {
         let e = load_full_policy();
-        let ev = make_exec_event(&["less", "/etc/clawtower/config.toml"]);
+        let ev = make_exec_event(&["less", "/etc/clawav/config.toml"]);
         let v = e.evaluate(&ev);
-        assert!(v.is_none() || v.as_ref().unwrap().rule_name != "deny-clawtower-config-write");
+        assert!(v.is_none() || v.as_ref().unwrap().rule_name != "deny-clawav-config-write");
     }
 
     #[test]
     fn test_config_write_chattr_minus_i() {
         let e = load_full_policy();
-        let ev = make_exec_event(&["chattr", "-i", "/etc/clawtower/config.toml"]);
+        let ev = make_exec_event(&["chattr", "-i", "/etc/clawav/config.toml"]);
         let v = e.evaluate(&ev).unwrap();
-        // Matches both deny-clawtower-tamper and deny-clawtower-config-write — critical either way
+        // Matches both deny-clawav-tamper and deny-clawav-config-write — critical either way
         assert_eq!(v.severity, Severity::Critical);
     }
 

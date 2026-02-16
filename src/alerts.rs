@@ -1,4 +1,4 @@
-//! Core alert types shared across all ClawTower modules.
+//! Core alert types shared across all ClawAV modules.
 //!
 //! Every monitoring subsystem produces [`Alert`] values with a [`Severity`] level,
 //! source tag, and human-readable message. These flow through the aggregator pipeline
@@ -51,7 +51,7 @@ impl Severity {
 
 /// A timestamped security alert from any monitoring source.
 ///
-/// Alerts are the universal currency of ClawTower — every module produces them,
+/// Alerts are the universal currency of ClawAV — every module produces them,
 /// the aggregator filters them, and consumers (TUI, Slack, API) display them.
 #[derive(Debug, Clone, Serialize)]
 pub struct Alert {

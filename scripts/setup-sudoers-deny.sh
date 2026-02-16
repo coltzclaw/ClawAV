@@ -1,40 +1,40 @@
 #!/bin/bash
-# Block the openclaw user from running sudo commands that could disable ClawTower
+# Block the openclaw user from running sudo commands that could disable ClawAV
 set -euo pipefail
 
-DENY_FILE="/etc/sudoers.d/clawtower-deny"
+DENY_FILE="/etc/sudoers.d/clawav-deny"
 AGENT_USER="openclaw"
 
 cat > "$DENY_FILE" << 'EOF'
-# ClawTower: Deny agent user from disabling the watchdog
+# ClawAV: Deny agent user from disabling the watchdog
 # This file is immutable (chattr +i) — requires admin key to modify
 
-# Block stopping/disabling ClawTower service
-openclaw ALL=(ALL) !/usr/bin/systemctl stop clawtower, \
-                    !/usr/bin/systemctl stop clawtower.service, \
-                    !/usr/bin/systemctl disable clawtower, \
-                    !/usr/bin/systemctl disable clawtower.service, \
-                    !/usr/bin/systemctl mask clawtower, \
-                    !/usr/bin/systemctl mask clawtower.service
+# Block stopping/disabling ClawAV service
+openclaw ALL=(ALL) !/usr/bin/systemctl stop clawav, \
+                    !/usr/bin/systemctl stop clawav.service, \
+                    !/usr/bin/systemctl disable clawav, \
+                    !/usr/bin/systemctl disable clawav.service, \
+                    !/usr/bin/systemctl mask clawav, \
+                    !/usr/bin/systemctl mask clawav.service
 
-# Block modifying ClawTower binary and config
-openclaw ALL=(ALL) !/usr/bin/chattr * /usr/local/bin/clawtower, \
-                    !/usr/bin/chattr * /etc/clawtower/*, \
-                    !/usr/bin/chattr * /etc/systemd/system/clawtower.service
+# Block modifying ClawAV binary and config
+openclaw ALL=(ALL) !/usr/bin/chattr * /usr/local/bin/clawav, \
+                    !/usr/bin/chattr * /etc/clawav/*, \
+                    !/usr/bin/chattr * /etc/systemd/system/clawav.service
 
-# Block removing/replacing ClawTower files
-openclaw ALL=(ALL) !/usr/bin/rm /usr/local/bin/clawtower, \
-                    !/usr/bin/rm -f /usr/local/bin/clawtower, \
-                    !/usr/bin/rm -rf /etc/clawtower, \
-                    !/usr/bin/rm -rf /etc/clawtower/*, \
-                    !/usr/bin/mv /usr/local/bin/clawtower *, \
-                    !/usr/bin/cp * /usr/local/bin/clawtower, \
-                    !/usr/bin/install * /usr/local/bin/clawtower
+# Block removing/replacing ClawAV files
+openclaw ALL=(ALL) !/usr/bin/rm /usr/local/bin/clawav, \
+                    !/usr/bin/rm -f /usr/local/bin/clawav, \
+                    !/usr/bin/rm -rf /etc/clawav, \
+                    !/usr/bin/rm -rf /etc/clawav/*, \
+                    !/usr/bin/mv /usr/local/bin/clawav *, \
+                    !/usr/bin/cp * /usr/local/bin/clawav, \
+                    !/usr/bin/install * /usr/local/bin/clawav
 
-# Block killing ClawTower process directly
+# Block killing ClawAV process directly
 openclaw ALL=(ALL) !/usr/bin/kill, \
-                    !/usr/bin/killall clawtower, \
-                    !/usr/bin/pkill clawtower
+                    !/usr/bin/killall clawav, \
+                    !/usr/bin/pkill clawav
 
 # Block getting a root shell (prevents sudo su / sudo -i / sudo bash escape)
 openclaw ALL=(ALL) !/usr/bin/su, \

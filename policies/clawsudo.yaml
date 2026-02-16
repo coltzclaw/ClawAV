@@ -1,4 +1,4 @@
-# ClawTower clawsudo Enforcement Policies
+# ClawAV clawsudo Enforcement Policies
 #
 # These policies are enforced by clawsudo (the sudo proxy).
 # Unlike default.yaml (detection-only), these BLOCK commands.
@@ -12,12 +12,12 @@
 
 rules:
   # ── Denied Commands (checked FIRST) ────────────────────────────────────────
-  - name: "deny-clawtower-tamper"
-    description: "Block modifications to ClawTower config and binaries"
+  - name: "deny-clawav-tamper"
+    description: "Block modifications to ClawAV config and binaries"
     match:
       command_contains:
-        - "/etc/clawtower"
-        - "/usr/local/bin/clawtower"
+        - "/etc/clawav"
+        - "/usr/local/bin/clawav"
         - "/usr/local/bin/clawsudo"
         - "chattr"
         - "auditctl -D"

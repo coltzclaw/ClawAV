@@ -132,8 +132,8 @@ const SECURITY_TAMPER_PATTERNS: &[&str] = &[
     "systemctl disable apparmor",
     "systemctl stop auditd",
     "systemctl disable auditd",
-    "systemctl stop clawtower",
-    "systemctl disable clawtower",
+    "systemctl stop clawav",
+    "systemctl disable clawav",
     "systemctl stop samhain",
     "systemctl disable samhain",
     "systemctl stop fail2ban",
@@ -390,8 +390,8 @@ pub fn classify_behavior(event: &ParsedEvent) -> Option<(BehaviorCategory, Sever
     // This catches `LD_PRELOAD=/tmp/evil.so ls` where the env var is set
     // before the command but may not appear in the parsed command args.
     if !event.raw.is_empty() && event.raw.contains("LD_PRELOAD=") {
-        // Don't flag ClawTower's own guard or build tools
-        if !event.raw.contains("clawtower") && !event.raw.contains("clawguard") {
+        // Don't flag ClawAV's own guard or build tools
+        if !event.raw.contains("clawav") && !event.raw.contains("clawguard") {
             let raw_binary = event.args.first().map(|s| {
                 s.rsplit('/').next().unwrap_or(s).to_string()
             }).unwrap_or_default();
@@ -463,7 +463,7 @@ pub fn classify_behavior(event: &ParsedEvent) -> Option<(BehaviorCategory, Sever
             for pattern in PRELOAD_BYPASS_PATTERNS {
                 if cmd.contains(pattern) {
                     // Don't flag our own legitimate preload operations
-                    if !cmd.contains("clawtower") && !cmd.contains("clawguard") {
+                    if !cmd.contains("clawav") && !cmd.contains("clawguard") {
                         // Don't flag normal compiler/linker invocations
                         if ["ld", "collect2", "cc1", "cc1plus", "gcc", "g++", "rustc", "cc"].contains(&binary) {
                             // Normal compilation — linker uses -dynamic-linker /lib/ld-linux-*.so.1
@@ -587,7 +587,7 @@ pub fn classify_behavior(event: &ParsedEvent) -> Option<(BehaviorCategory, Sever
         // --- WARNING: Service creation/modification ---
         if binary == "systemctl" {
             for pattern in SERVICE_CREATION_PATTERNS {
-                if cmd.contains(pattern) && !cmd.contains("clawtower") {
+                if cmd.contains(pattern) && !cmd.contains("clawav") {
                     return Some((BehaviorCategory::SecurityTamper, Severity::Warning));
                 }
             }
@@ -2151,11 +2151,11 @@ mod tests {
         assert_eq!(result, Some((BehaviorCategory::SecurityTamper, Severity::Warning)));
     }
 
-    // --- Security tamper: stopping clawtower ---
+    // --- Security tamper: stopping clawav ---
 
     #[test]
-    fn test_stop_clawtower() {
-        let event = make_exec_event(&["systemctl", "stop", "clawtower"]);
+    fn test_stop_clawav() {
+        let event = make_exec_event(&["systemctl", "stop", "clawav"]);
         let result = classify_behavior(&event);
         assert_eq!(result, Some((BehaviorCategory::SecurityTamper, Severity::Critical)));
     }
@@ -2473,7 +2473,7 @@ mod tests {
             args: vec![],
             file_path: Some("/home/openclaw/.aws/credentials".to_string()),
             success: true,
-            raw: r#"type=SYSCALL msg=audit(1707849600.123:456): arch=c00000b7 syscall=56 success=yes exe="/usr/bin/cat" key="clawtower_cred_read""#.to_string(),
+            raw: r#"type=SYSCALL msg=audit(1707849600.123:456): arch=c00000b7 syscall=56 success=yes exe="/usr/bin/cat" key="clawav_cred_read""#.to_string(),
             actor: Actor::Agent,
             ppid_exe: None,
         };
@@ -2492,7 +2492,7 @@ mod tests {
             args: vec![],
             file_path: Some("/home/openclaw/.openclaw/gateway.yaml".to_string()),
             success: true,
-            raw: r#"type=SYSCALL msg=audit(1707849600.123:456): arch=c00000b7 syscall=56 success=yes exe="/usr/bin/node" key="clawtower_cred_read""#.to_string(),
+            raw: r#"type=SYSCALL msg=audit(1707849600.123:456): arch=c00000b7 syscall=56 success=yes exe="/usr/bin/node" key="clawav_cred_read""#.to_string(),
             actor: Actor::Agent,
             ppid_exe: None,
         };

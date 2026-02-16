@@ -61,9 +61,9 @@ impl SlackNotifier {
 
         let payload = json!({
             "channel": self.channel,
-            "username": "ClawTower",
+            "username": "ClawAV",
             "icon_emoji": ":shield:",
-            "text": "🛡️ ClawTower webhook test — connection verified!"
+            "text": "🛡️ ClawAV webhook test — connection verified!"
         });
 
         let resp = reqwest::Client::new()
@@ -87,9 +87,9 @@ impl SlackNotifier {
 
         let payload = json!({
             "channel": self.channel,
-            "username": "ClawTower",
+            "username": "ClawAV",
             "icon_emoji": ":shield:",
-            "text": "🛡️ ClawTower watchdog started — independent monitoring active"
+            "text": "🛡️ ClawAV watchdog started — independent monitoring active"
         });
 
         self.post_webhook(&payload).await
@@ -101,9 +101,9 @@ impl SlackNotifier {
         }
         let payload = serde_json::json!({
             "channel": self.channel,
-            "username": "ClawTower",
+            "username": "ClawAV",
             "icon_emoji": ":shield:",
-            "text": format!("❤️ ClawTower heartbeat — uptime: {}h {}m, alerts processed: {}",
+            "text": format!("❤️ ClawAV heartbeat — uptime: {}h {}m, alerts processed: {}",
                 uptime_secs / 3600, (uptime_secs % 3600) / 60, alert_count)
         });
         self.post_webhook(&payload).await
@@ -122,11 +122,11 @@ impl SlackNotifier {
 
         let payload = json!({
             "channel": self.channel,
-            "username": "ClawTower",
+            "username": "ClawAV",
             "icon_emoji": ":shield:",
             "attachments": [{
                 "color": color,
-                "title": format!("{} ClawTower Alert", alert.severity.emoji()),
+                "title": format!("{} ClawAV Alert", alert.severity.emoji()),
                 "text": alert.message,
                 "fields": [
                     { "title": "Severity", "value": alert.severity.to_string(), "short": true },

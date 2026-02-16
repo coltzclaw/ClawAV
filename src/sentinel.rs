@@ -1563,7 +1563,7 @@ mod tests {
 
     /// Helper: check if xattr is supported on the given path
     fn xattr_supported(path: &Path) -> bool {
-        let test_attr = "user.clawtower_test";
+        let test_attr = "user.clawav_test";
         xattr::set(path, test_attr, b"test").is_ok() && {
             let _ = xattr::remove(path, test_attr);
             true

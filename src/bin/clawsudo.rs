@@ -1,4 +1,4 @@
-//! clawsudo — sudo proxy/gatekeeper for ClawTower
+//! clawsudo — sudo proxy/gatekeeper for ClawAV
 //!
 //! Every privileged command goes through policy evaluation before execution.
 //! Usage: `clawsudo <command> [args...]`
@@ -160,7 +160,7 @@ fn log_line(status: &str, full_cmd: &str) {
     let line = format!("[{}] [{}] user=openclaw cmd=\"{}\"\n", ts, status, full_cmd);
 
     // Try production path, fall back to local
-    let log_paths: &[&str] = &["/var/log/clawtower/clawsudo.log", "./clawsudo.log"];
+    let log_paths: &[&str] = &["/var/log/clawav/clawsudo.log", "./clawsudo.log"];
     for path in log_paths {
         if let Ok(mut f) = std::fs::OpenOptions::new()
             .create(true)
@@ -173,7 +173,7 @@ fn log_line(status: &str, full_cmd: &str) {
     }
 
     // Also append to audit chain if it exists
-    let chain_path = "/var/log/clawtower/audit.chain";
+    let chain_path = "/var/log/clawav/audit.chain";
     if Path::new(chain_path).exists() {
         if let Ok(mut f) = std::fs::OpenOptions::new().append(true).open(chain_path) {
             let _ = f.write_all(line.as_bytes());
@@ -185,7 +185,7 @@ fn log_line(status: &str, full_cmd: &str) {
 
 fn load_webhook_url() -> Option<String> {
     let paths = [
-        PathBuf::from("/etc/clawtower/config.toml"),
+        PathBuf::from("/etc/clawav/config.toml"),
         PathBuf::from("./config.toml"),
     ];
     for path in &paths {
@@ -226,7 +226,7 @@ const GTFOBINS_PATTERNS: &[&str] = &[
     // tee to sensitive paths
     "/etc/sudoers", "/etc/shadow", "/etc/passwd",
     // cp/mv to sensitive paths
-    " /usr/local/bin/clawtower", " /etc/clawtower/",
+    " /usr/local/bin/clawav", " /etc/clawav/",
     // systemd-run
     "systemd-run",
     // find -exec (arbitrary command execution)
@@ -289,11 +289,11 @@ fn check_gtfobins(cmd_binary: &str, args: &[String], full_cmd: &str) -> Option<S
 // ─── Main ───
 
 fn print_help() {
-    eprintln!("clawsudo — sudo proxy/gatekeeper for ClawTower");
+    eprintln!("clawsudo — sudo proxy/gatekeeper for ClawAV");
     eprintln!();
     eprintln!("Usage: clawsudo <command> [args...]");
     eprintln!();
-    eprintln!("Every privileged command is evaluated against ClawTower policy rules");
+    eprintln!("Every privileged command is evaluated against ClawAV policy rules");
     eprintln!("before being passed to sudo for execution.");
     eprintln!();
     eprintln!("Policy decisions:");
@@ -307,8 +307,8 @@ fn print_help() {
     eprintln!("  77  denied by policy");
     eprintln!("  78  approval timeout");
     eprintln!();
-    eprintln!("Policy files: /etc/clawtower/policies/*.yaml");
-    eprintln!("Logs: /var/log/clawtower/clawsudo.log");
+    eprintln!("Policy files: /etc/clawav/policies/*.yaml");
+    eprintln!("Logs: /var/log/clawav/clawsudo.log");
 }
 
 fn main() -> ExitCode {
@@ -333,7 +333,7 @@ fn main() -> ExitCode {
 
     // Load policies
     let policy_dirs: Vec<&Path> = vec![
-        Path::new("/etc/clawtower/policies/"),
+        Path::new("/etc/clawav/policies/"),
         Path::new("./policies/"),
     ];
     let rules = load_policies(&policy_dirs);
@@ -601,9 +601,9 @@ mod tests {
     }
 
     #[test]
-    fn test_clawtower_tamper_denied() {
+    fn test_clawav_tamper_denied() {
         let rules = load_test_rules();
-        let result = evaluate(&rules, "chattr", "chattr +i /etc/clawtower/config.toml").unwrap();
+        let result = evaluate(&rules, "chattr", "chattr +i /etc/clawav/config.toml").unwrap();
         assert_eq!(result.enforcement, Enforcement::Deny);
     }
 
@@ -657,9 +657,9 @@ mod tests {
     }
 
     #[test]
-    fn test_gtfobins_cp_clawtower() {
-        let args: Vec<String> = vec!["cp".into(), "file".into(), "/usr/local/bin/clawtower".into()];
-        let full = "cp file /usr/local/bin/clawtower";
+    fn test_gtfobins_cp_clawav() {
+        let args: Vec<String> = vec!["cp".into(), "file".into(), "/usr/local/bin/clawav".into()];
+        let full = "cp file /usr/local/bin/clawav";
         assert!(check_gtfobins("cp", &args, full).is_some());
     }
 
@@ -700,8 +700,8 @@ mod tests {
 
     #[test]
     fn test_gtfobins_systemctl_restart_safe() {
-        let args: Vec<String> = vec!["systemctl".into(), "restart".into(), "clawtower".into()];
-        let full = "systemctl restart clawtower";
+        let args: Vec<String> = vec!["systemctl".into(), "restart".into(), "clawav".into()];
+        let full = "systemctl restart clawav";
         assert!(check_gtfobins("systemctl", &args, full).is_none());
     }
 

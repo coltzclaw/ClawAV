@@ -1,4 +1,4 @@
-//! Self-update subcommand: `clawtower update`
+//! Self-update subcommand: `clawav update`
 //!
 //! 1. Prompts for admin key (or accepts --key flag)
 //! 2. Checks GitHub releases API for latest version
@@ -17,7 +17,7 @@ use tokio::sync::mpsc;
 use crate::alerts::{Alert, Severity};
 use std::time::Duration;
 
-const GITHUB_REPO: &str = "coltz108/ClawTower";
+const GITHUB_REPO: &str = "coltz108/ClawAV";
 const RELEASE_PUBLIC_KEY: &[u8; 32] = include_bytes!("release-key.pub");
 
 /// Verify an Ed25519 signature over the SHA-256 digest of a binary.
@@ -41,14 +41,14 @@ fn verify_release_signature(binary_data: &[u8], sig_bytes: &[u8]) -> Result<()> 
     Ok(())
 }
 /// Path to the stored admin key hash (Argon2), used for custom binary installs.
-const ADMIN_KEY_HASH_PATH: &str = "/etc/clawtower/admin.key.hash";
+const ADMIN_KEY_HASH_PATH: &str = "/etc/clawav/admin.key.hash";
 
 /// Detect the correct release asset name for this platform
 fn asset_name() -> &'static str {
     if cfg!(target_arch = "aarch64") {
-        "clawtower-aarch64-linux"
+        "clawav-aarch64-linux"
     } else {
-        "clawtower-x86_64-linux"
+        "clawav-x86_64-linux"
     }
 }
 
@@ -87,7 +87,7 @@ fn get_admin_key(args: &[String]) -> Result<String> {
 /// Verify admin key against stored hash
 fn verify_admin_key(key: &str) -> Result<bool> {
     let hash = fs::read_to_string(ADMIN_KEY_HASH_PATH)
-        .context("Cannot read admin key hash — is ClawTower installed?")?;
+        .context("Cannot read admin key hash — is ClawAV installed?")?;
     Ok(crate::admin::verify_key(key, hash.trim()))
 }
 
@@ -108,7 +108,7 @@ fn fetch_release(version: Option<&str>) -> Result<(String, String, Option<String
     };
 
     let client = reqwest::blocking::Client::builder()
-        .user_agent("clawtower-updater")
+        .user_agent("clawav-updater")
         .build()?;
 
     let resp = client.get(&url).send()?.error_for_status()?;
@@ -153,7 +153,7 @@ fn fetch_release(version: Option<&str>) -> Result<(String, String, Option<String
 fn download_and_verify(download_url: &str, sha256_url: Option<&str>) -> Result<Vec<u8>> {
     eprintln!("Downloading binary...");
     let client = reqwest::blocking::Client::builder()
-        .user_agent("clawtower-updater")
+        .user_agent("clawav-updater")
         .build()?;
 
     let binary_data = client
@@ -214,7 +214,7 @@ fn run_cmd(program: &str, args: &[&str]) -> Result<()> {
 ///
 /// Silently fails if Slack is not configured or the webhook request errors.
 fn notify_slack(from_version: &str, to_version: &str) {
-    let config_path = PathBuf::from("/etc/clawtower/config.toml");
+    let config_path = PathBuf::from("/etc/clawav/config.toml");
     let config = match crate::config::Config::load(&config_path) {
         Ok(c) => c,
         Err(_) => return,
@@ -225,7 +225,7 @@ fn notify_slack(from_version: &str, to_version: &str) {
 
     let payload = serde_json::json!({
         "text": format!(
-            "🔄 *ClawTower self-update complete*\n`{}` → `{}`\nBinary: `{}`\nHost: {}",
+            "🔄 *ClawAV self-update complete*\n`{}` → `{}`\nBinary: `{}`\nHost: {}",
             from_version,
             to_version,
             current_binary_path().map(|p| p.display().to_string()).unwrap_or_else(|_| "unknown".into()),
@@ -273,14 +273,14 @@ fn get_target_version(args: &[String]) -> Option<String> {
     None
 }
 
-/// Main entry point for `clawtower update`.
+/// Main entry point for `clawav update`.
 ///
 /// Supports `--check` (dry run), `--version <ver>` (specific release),
 /// `--binary <path>` (custom binary requiring admin key), and `--key <key>`.
 /// GitHub release path uses SHA-256 + optional Ed25519 signature verification.
 pub fn run_update(args: &[String]) -> Result<()> {
     let current_version = env!("CARGO_PKG_VERSION");
-    eprintln!("🛡️  ClawTower Self-Update");
+    eprintln!("🛡️  ClawAV Self-Update");
     eprintln!("Current version: v{}", current_version);
     eprintln!();
 
@@ -340,7 +340,7 @@ pub fn run_update(args: &[String]) -> Result<()> {
         if let Some(ref sig_url) = sig_url {
             eprintln!("Verifying Ed25519 signature...");
             let client = reqwest::blocking::Client::builder()
-                .user_agent("clawtower-updater")
+                .user_agent("clawav-updater")
                 .build()?;
             let sig_bytes = client.get(sig_url).send()?.error_for_status()?.bytes()?.to_vec();
             verify_release_signature(&data, &sig_bytes)?;
@@ -386,8 +386,8 @@ pub fn run_update(args: &[String]) -> Result<()> {
     notify_slack(&format!("v{}", current_version), &version_tag);
 
     // 6. Restart service
-    eprintln!("Restarting clawtower service...");
-    let restart_result = run_cmd("systemctl", &["restart", "clawtower"]);
+    eprintln!("Restarting clawav service...");
+    let restart_result = run_cmd("systemctl", &["restart", "clawav"]);
     match restart_result {
         Ok(()) => eprintln!("✅ Service restarted"),
         Err(e) => eprintln!("⚠️  Service restart failed ({}). You may need to restart manually.", e),
@@ -455,7 +455,7 @@ pub async fn run_auto_updater(alert_tx: mpsc::Sender<Alert>, interval_secs: u64,
                 if last_notified != tag {
                     let _ = tx.send(Alert::new(
                         Severity::Info, "auto-update",
-                        &format!("🆕 ClawTower {} available (current: v{}). Run `clawtower update` to install.", tag, current_version),
+                        &format!("🆕 ClawAV {} available (current: v{}). Run `clawav update` to install.", tag, current_version),
                     )).await;
                 }
                 return Ok(Some(tag));
@@ -477,7 +477,7 @@ pub async fn run_auto_updater(alert_tx: mpsc::Sender<Alert>, interval_secs: u64,
                 let data = download_and_verify(&dl_url, sha_url.as_deref())?;
                 let sig = if let Some(ref su) = sig_url2 {
                     let client = reqwest::blocking::Client::builder()
-                        .user_agent("clawtower-updater").build()?;
+                        .user_agent("clawav-updater").build()?;
                     Some(client.get(su).send()?.error_for_status()?.bytes()?.to_vec())
                 } else { None };
                 Ok((data, sig))
@@ -499,18 +499,18 @@ pub async fn run_auto_updater(alert_tx: mpsc::Sender<Alert>, interval_secs: u64,
             let _ = run_cmd("chattr", &["-i", &binary_path.to_string_lossy()]);
             fs::rename(&tmp_path, &binary_path)?;
             let _ = run_cmd("chattr", &["+i", &binary_path.to_string_lossy()]);
-            let _ = run_cmd("chattr", &["+i", "/etc/clawtower/admin.key.hash"]);
+            let _ = run_cmd("chattr", &["+i", "/etc/clawav/admin.key.hash"]);
 
             // Update tray binary if installed
-            if std::path::Path::new("/usr/local/bin/clawtower-tray").exists() {
-                let tray_asset = format!("clawtower-tray-{}-linux", if cfg!(target_arch = "aarch64") { "aarch64" } else { "x86_64" });
+            if std::path::Path::new("/usr/local/bin/clawav-tray").exists() {
+                let tray_asset = format!("clawav-tray-{}-linux", if cfg!(target_arch = "aarch64") { "aarch64" } else { "x86_64" });
                 let tray_url = format!("https://github.com/{}/releases/download/{}/{}", GITHUB_REPO, tag, tray_asset);
                 match tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
-                    let client = reqwest::blocking::Client::builder().user_agent("clawtower-updater").build()?;
+                    let client = reqwest::blocking::Client::builder().user_agent("clawav-updater").build()?;
                     Ok(client.get(&tray_url).send()?.error_for_status()?.bytes()?.to_vec())
                 }).await {
                     Ok(Ok(tray_data)) => {
-                        let tray_path = std::path::PathBuf::from("/usr/local/bin/clawtower-tray");
+                        let tray_path = std::path::PathBuf::from("/usr/local/bin/clawav-tray");
                         let tray_tmp = tray_path.with_extension("new");
                         if fs::write(&tray_tmp, &tray_data).is_ok() {
                             #[cfg(unix)]
@@ -518,9 +518,9 @@ pub async fn run_auto_updater(alert_tx: mpsc::Sender<Alert>, interval_secs: u64,
                                 use std::os::unix::fs::PermissionsExt;
                                 let _ = fs::set_permissions(&tray_tmp, fs::Permissions::from_mode(0o755));
                             }
-                            let _ = run_cmd("chattr", &["-i", "/usr/local/bin/clawtower-tray"]);
+                            let _ = run_cmd("chattr", &["-i", "/usr/local/bin/clawav-tray"]);
                             let _ = fs::rename(&tray_tmp, &tray_path);
-                            let _ = run_cmd("chattr", &["+i", "/usr/local/bin/clawtower-tray"]);
+                            let _ = run_cmd("chattr", &["+i", "/usr/local/bin/clawav-tray"]);
                         }
                     }
                     _ => {} // Tray update is best-effort
@@ -540,7 +540,7 @@ pub async fn run_auto_updater(alert_tx: mpsc::Sender<Alert>, interval_secs: u64,
             }).await;
 
             // Restart service
-            let _ = run_cmd("systemctl", &["restart", "clawtower"]);
+            let _ = run_cmd("systemctl", &["restart", "clawav"]);
 
             Ok(None)
         }.await;
@@ -567,7 +567,7 @@ mod tests {
     #[test]
     fn test_asset_name() {
         let name = asset_name();
-        assert!(name.starts_with("clawtower-"));
+        assert!(name.starts_with("clawav-"));
         assert!(name.contains("-linux"));
     }
 

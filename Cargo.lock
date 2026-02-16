@@ -203,7 +203,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "clawtower"
+name = "clawav"
 version = "0.3.1"
 dependencies = [
  "anyhow",

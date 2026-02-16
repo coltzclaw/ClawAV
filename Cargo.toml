@@ -1,5 +1,5 @@
 [package]
-name = "clawtower"
+name = "clawav"
 version = "0.3.1"
 edition = "2021"
 description = "Tamper-proof security watchdog for AI agents"
@@ -38,7 +38,7 @@ png = { version = "0.17", optional = true }
 tray = ["dep:ksni", "dep:dbus", "dep:png"]
 
 [[bin]]
-name = "clawtower"
+name = "clawav"
 path = "src/main.rs"
 
 [[bin]]
@@ -46,13 +46,13 @@ name = "clawsudo"
 path = "src/bin/clawsudo.rs"
 
 [[bin]]
-name = "clawtower-tray"
-path = "src/bin/clawtower-tray.rs"
+name = "clawav-tray"
+path = "src/bin/clawav-tray.rs"
 required-features = ["tray"]
 
 [[bin]]
-name = "clawtower-ctl"
-path = "src/bin/clawtower-ctl.rs"
+name = "clawav-ctl"
+path = "src/bin/clawav-ctl.rs"
 required-features = ["tray"]
 
 [dev-dependencies]

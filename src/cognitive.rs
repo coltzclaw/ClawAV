@@ -7,7 +7,7 @@
 //! - **Protected**: modifications trigger Critical alerts (identity tampering)
 //! - **Watched**: modifications are logged as Info with diffs, then auto-rebaselined
 //!
-//! Shadow copies in `/etc/clawtower/cognitive-shadow/` enable unified diff generation
+//! Shadow copies in `/etc/clawav/cognitive-shadow/` enable unified diff generation
 //! for watched file changes.
 
 use anyhow::Result;
@@ -217,7 +217,7 @@ fn compute_sha256(path: &Path) -> Result<String> {
 }
 
 /// Shadow directory for storing previous versions of watched files
-const SHADOW_DIR: &str = "/etc/clawtower/cognitive-shadow";
+const SHADOW_DIR: &str = "/etc/clawav/cognitive-shadow";
 
 /// Generate a unified diff between the shadow (previous) and current version
 fn generate_diff(current_path: &Path, _workspace_dir: &Path) -> Option<String> {

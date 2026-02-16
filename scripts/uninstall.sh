@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ClawTower Uninstaller
+# ClawAV Uninstaller
 #
 # Reverses the "swallowed key" hardening from install.sh.
 # Requires the admin key that was displayed on first run.
@@ -13,8 +13,8 @@
 set -euo pipefail
 
 # ── Logging ──────────────────────────────────────────────────────────────────
-UNINSTALL_LOG="/var/log/clawtower/uninstall-$(date +%Y%m%d-%H%M%S).log"
-mkdir -p /var/log/clawtower 2>/dev/null || UNINSTALL_LOG="/tmp/clawtower-uninstall-$(date +%Y%m%d-%H%M%S).log"
+UNINSTALL_LOG="/var/log/clawav/uninstall-$(date +%Y%m%d-%H%M%S).log"
+mkdir -p /var/log/clawav 2>/dev/null || UNINSTALL_LOG="/tmp/clawav-uninstall-$(date +%Y%m%d-%H%M%S).log"
 exec > >(tee -a "$UNINSTALL_LOG") 2>&1
 echo "Uninstall log: $UNINSTALL_LOG"
 
@@ -53,7 +53,7 @@ for arg in "$@"; do
             echo ""
             exit 0
             ;;
-        OCAV-*|clawtower_admin_*)
+        OCAV-*|clawav_admin_*)
             ADMIN_KEY="$arg"
             ;;
     esac
@@ -81,45 +81,45 @@ fi
 
 echo ""
 echo -e "${RED}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${RED}║           🛡️  ClawTower Uninstaller                            ║${NC}"
+echo -e "${RED}║           🛡️  ClawAV Uninstaller                            ║${NC}"
 echo -e "${RED}║                                                              ║${NC}"
-echo -e "${RED}║  This will reverse all hardening and remove ClawTower.          ║${NC}"
+echo -e "${RED}║  This will reverse all hardening and remove ClawAV.          ║${NC}"
 echo -e "${RED}║  The security watchdog will no longer protect this system.   ║${NC}"
 echo -e "${RED}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
 # ── Verify Admin Key ─────────────────────────────────────────────────────────
-KEY_HASH_PATH="/etc/clawtower/admin.key.hash"
+KEY_HASH_PATH="/etc/clawav/admin.key.hash"
 
 if ! $FORCE; then
     if [[ ! -f "$KEY_HASH_PATH" ]]; then
         warn "No admin key hash found at $KEY_HASH_PATH"
-        warn "ClawTower may not have been hardened (install.sh not run)"
+        warn "ClawAV may not have been hardened (install.sh not run)"
         echo ""
         read -rp "Continue with uninstall anyway? [y/N]: " confirm
         [[ "$confirm" =~ ^[Yy] ]] || exit 0
     else
         # Prompt for key if not provided
         if [[ -z "$ADMIN_KEY" ]]; then
-            echo -e "${CYAN}Enter your ClawTower admin key:${NC}"
+            echo -e "${CYAN}Enter your ClawAV admin key:${NC}"
             read -r -p "> " ADMIN_KEY
         fi
 
         [[ -n "$ADMIN_KEY" ]] || die "No admin key provided"
 
-        # Verify using clawtower verify-key
-        CLAWTOWER_BIN="$(command -v clawtower 2>/dev/null || true)"
-        if [[ ! -x "$CLAWTOWER_BIN" ]]; then
+        # Verify using clawav verify-key
+        CLAWAV_BIN="$(command -v clawav 2>/dev/null || true)"
+        if [[ ! -x "$CLAWAV_BIN" ]]; then
             # Try to find it in common locations
-            for candidate in /usr/local/bin/clawtower /home/openclaw/bin/clawtower ./target/release/clawtower /home/openclaw/.openclaw/workspace/openclawtower/target/release/clawtower; do
+            for candidate in /usr/local/bin/clawav /home/openclaw/bin/clawav ./target/release/clawav /home/openclaw/.openclaw/workspace/openclawav/target/release/clawav; do
                 if [[ -x "$candidate" ]]; then
-                    CLAWTOWER_BIN="$candidate"
+                    CLAWAV_BIN="$candidate"
                     break
                 fi
             done
         fi
 
-        if echo "$ADMIN_KEY" | "$CLAWTOWER_BIN" verify-key; then
+        if echo "$ADMIN_KEY" | "$CLAWAV_BIN" verify-key; then
             log "✅ Admin key verified"
         else
             die "❌ Invalid admin key. Uninstall denied."
@@ -138,40 +138,40 @@ log "Sudo access is required for privileged operations — you may be prompted."
 echo ""
 
 # ── 1. Stop the service ──────────────────────────────────────────────────────
-log "Stopping ClawTower service..."
-sudo systemctl stop clawtower 2>/dev/null || true
-sudo systemctl disable clawtower 2>/dev/null || true
+log "Stopping ClawAV service..."
+sudo systemctl stop clawav 2>/dev/null || true
+sudo systemctl disable clawav 2>/dev/null || true
 
 # ── 2. Remove immutable attributes ───────────────────────────────────────────
 log "Removing immutable attributes..."
-sudo chattr -i /usr/local/bin/clawtower 2>/dev/null || true
+sudo chattr -i /usr/local/bin/clawav 2>/dev/null || true
 sudo chattr -i /usr/local/bin/clawsudo 2>/dev/null || true
-sudo chattr -i /usr/local/bin/clawtower-tray 2>/dev/null || true
-sudo chattr -i /etc/clawtower/admin.key.hash 2>/dev/null || true
-sudo chattr -i /etc/systemd/system/clawtower.service 2>/dev/null || true
-sudo chattr -i /etc/sudoers.d/clawtower-deny 2>/dev/null || true
+sudo chattr -i /usr/local/bin/clawav-tray 2>/dev/null || true
+sudo chattr -i /etc/clawav/admin.key.hash 2>/dev/null || true
+sudo chattr -i /etc/systemd/system/clawav.service 2>/dev/null || true
+sudo chattr -i /etc/sudoers.d/clawav-deny 2>/dev/null || true
 sudo chattr -i /etc/sudoers.d/010_pi-nopasswd 2>/dev/null || true
 
 # ── 3. Remove AppArmor profile ───────────────────────────────────────────────
 log "Removing AppArmor profile..."
 if command -v apparmor_parser &>/dev/null; then
-    # Current name (installer creates clawtower.deny-agent)
-    sudo apparmor_parser -R /etc/apparmor.d/clawtower.deny-agent 2>/dev/null || true
-    sudo rm -f /etc/apparmor.d/clawtower.deny-agent
+    # Current name (installer creates clawav.deny-agent)
+    sudo apparmor_parser -R /etc/apparmor.d/clawav.deny-agent 2>/dev/null || true
+    sudo rm -f /etc/apparmor.d/clawav.deny-agent
     # Legacy names from older installs
-    sudo apparmor_parser -R /etc/apparmor.d/clawtower.deny-openclaw 2>/dev/null || true
-    sudo rm -f /etc/apparmor.d/clawtower.deny-openclaw
-    sudo rm -f /etc/apparmor.d/etc.clawtower.protect
+    sudo apparmor_parser -R /etc/apparmor.d/clawav.deny-openclaw 2>/dev/null || true
+    sudo rm -f /etc/apparmor.d/clawav.deny-openclaw
+    sudo rm -f /etc/apparmor.d/etc.clawav.protect
 fi
 
 # ── 4. Remove sudoers restrictions ───────────────────────────────────────────
 log "Removing sudoers restrictions..."
-sudo rm -f /etc/sudoers.d/clawtower-deny
+sudo rm -f /etc/sudoers.d/clawav-deny
 sudo rm -f /etc/sudoers.d/010_pi-nopasswd
 
 # ── 5. Remove kernel hardening ───────────────────────────────────────────────
 log "Removing kernel hardening sysctl..."
-sudo rm -f /etc/sysctl.d/99-clawtower.conf
+sudo rm -f /etc/sysctl.d/99-clawav.conf
 # Restore default ptrace scope
 sudo sysctl -w kernel.yama.ptrace_scope=1 2>/dev/null || true
 # Note: kernel.modules_disabled=1 cannot be undone without reboot
@@ -180,10 +180,10 @@ warn "kernel.modules_disabled may still be active — reboot to restore module l
 # ── 6. Remove capability restrictions ────────────────────────────────────────
 log "Removing capability restrictions..."
 if [[ -f /etc/security/capability.conf ]]; then
-    sudo sed -i '/clawtower\|openclaw.*cap_linux_immutable\|openclaw.*cap_sys_ptrace\|openclaw.*cap_sys_module/d' /etc/security/capability.conf 2>/dev/null || true
+    sudo sed -i '/clawav\|openclaw.*cap_linux_immutable\|openclaw.*cap_sys_ptrace\|openclaw.*cap_sys_module/d' /etc/security/capability.conf 2>/dev/null || true
 fi
 # Remove pam_cap line we added
-sudo sed -i '/pam_cap.so.*# ClawTower/d' /etc/pam.d/common-auth 2>/dev/null || true
+sudo sed -i '/pam_cap.so.*# ClawAV/d' /etc/pam.d/common-auth 2>/dev/null || true
 
 # ── 7. Remove LD_PRELOAD guard ───────────────────────────────────────────────
 log "Removing LD_PRELOAD guard..."
@@ -196,7 +196,7 @@ fi
 
 # ── 8. Remove systemd service ────────────────────────────────────────────────
 log "Removing systemd service..."
-sudo rm -f /etc/systemd/system/clawtower.service
+sudo rm -f /etc/systemd/system/clawav.service
 sudo systemctl daemon-reload
 
 # ── 9. Remove tray autostart + binary ────────────────────────────────────────
@@ -204,48 +204,48 @@ log "Removing tray components..."
 # Find the calling user's home for autostart cleanup
 CALLING_USER="${SUDO_USER:-$USER}"
 CALLING_HOME=$(eval echo "~$CALLING_USER")
-sudo rm -f "$CALLING_HOME/.config/autostart/clawtower-tray.desktop" 2>/dev/null || true
+sudo rm -f "$CALLING_HOME/.config/autostart/clawav-tray.desktop" 2>/dev/null || true
 
 # ── 10. Remove binaries ──────────────────────────────────────────────────────
 log "Removing binaries..."
-sudo rm -f /usr/local/bin/clawtower
+sudo rm -f /usr/local/bin/clawav
 sudo rm -f /usr/local/bin/clawsudo
-sudo rm -f /usr/local/bin/clawtower-tray
+sudo rm -f /usr/local/bin/clawav-tray
 
 # ── 11. Warn about quarantined files ──────────────────────────────────────────
-if [[ -d /etc/clawtower/quarantine ]] && [[ -n "$(ls -A /etc/clawtower/quarantine 2>/dev/null)" ]]; then
-    QCOUNT=$(find /etc/clawtower/quarantine -type f 2>/dev/null | wc -l)
-    warn "Quarantined files found in /etc/clawtower/quarantine/ ($QCOUNT files):"
-    ls -la /etc/clawtower/quarantine/ 2>/dev/null | head -10 || true
+if [[ -d /etc/clawav/quarantine ]] && [[ -n "$(ls -A /etc/clawav/quarantine 2>/dev/null)" ]]; then
+    QCOUNT=$(find /etc/clawav/quarantine -type f 2>/dev/null | wc -l)
+    warn "Quarantined files found in /etc/clawav/quarantine/ ($QCOUNT files):"
+    ls -la /etc/clawav/quarantine/ 2>/dev/null | head -10 || true
     echo ""
-    warn "These are files ClawTower intercepted as threats."
+    warn "These are files ClawAV intercepted as threats."
     warn "They will be deleted. Copy them out now if you need them."
     read -rp "Continue? [Y/n]: " confirm
-    [[ "$confirm" =~ ^[Nn] ]] && { info "Aborting. Move files from /etc/clawtower/quarantine/ first."; exit 0; }
+    [[ "$confirm" =~ ^[Nn] ]] && { info "Aborting. Move files from /etc/clawav/quarantine/ first."; exit 0; }
 fi
 
 # ── 12. Remove config ────────────────────────────────────────────────────────
 log "Removing configuration..."
-sudo rm -rf /etc/clawtower
+sudo rm -rf /etc/clawav
 
 # ── 13. Remove data (unless --keep-data) ─────────────────────────────────────
 if $KEEP_DATA; then
-    info "Keeping logs and audit data at /var/log/clawtower/"
+    info "Keeping logs and audit data at /var/log/clawav/"
 else
     log "Removing logs and audit data..."
-    sudo rm -rf /var/log/clawtower
+    sudo rm -rf /var/log/clawav
 fi
-sudo rm -rf /var/run/clawtower
+sudo rm -rf /var/run/clawav
 
-# ── 15. Remove clawtower system user ────────────────────────────────────────────
-if id -u clawtower &>/dev/null; then
-    log "Removing clawtower system user..."
-    sudo userdel clawtower 2>/dev/null || true
+# ── 15. Remove clawav system user ────────────────────────────────────────────
+if id -u clawav &>/dev/null; then
+    log "Removing clawav system user..."
+    sudo userdel clawav 2>/dev/null || true
 fi
 
 # ── 14. Remove audit rules file ───────────────────────────────────────────────
 log "Removing audit rules..."
-sudo rm -f /etc/audit/rules.d/clawtower.rules
+sudo rm -f /etc/audit/rules.d/clawav.rules
 if command -v auditctl &>/dev/null; then
     sudo augenrules --load 2>/dev/null || true
     sudo auditctl -e 1 2>/dev/null || warn "Audit rules locked — will unlock on reboot"
@@ -254,19 +254,19 @@ fi
 # ── Done ──────────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${GREEN}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║  ✅ ClawTower uninstalled successfully                         ║${NC}"
+echo -e "${GREEN}║  ✅ ClawAV uninstalled successfully                         ║${NC}"
 echo -e "${GREEN}╠══════════════════════════════════════════════════════════════╣${NC}"
 echo -e "${GREEN}║                                                              ║${NC}"
 echo -e "${GREEN}║  Removed:                                                    ║${NC}"
-echo -e "${GREEN}║    • Binaries (clawtower, clawsudo, clawtower-tray)               ║${NC}"
-echo -e "${GREEN}║    • Config + quarantine (/etc/clawtower/)                     ║${NC}"
+echo -e "${GREEN}║    • Binaries (clawav, clawsudo, clawav-tray)               ║${NC}"
+echo -e "${GREEN}║    • Config + quarantine (/etc/clawav/)                     ║${NC}"
 echo -e "${GREEN}║    • Systemd service                                        ║${NC}"
 echo -e "${GREEN}║    • Tray autostart entry                                   ║${NC}"
-echo -e "${GREEN}║    • AppArmor profile (clawtower.deny-agent)                   ║${NC}"
-echo -e "${GREEN}║    • Sudoers (clawtower-deny + 010_pi-nopasswd)                ║${NC}"
+echo -e "${GREEN}║    • AppArmor profile (clawav.deny-agent)                   ║${NC}"
+echo -e "${GREEN}║    • Sudoers (clawav-deny + 010_pi-nopasswd)                ║${NC}"
 echo -e "${GREEN}║    • Kernel hardening sysctl                                ║${NC}"
 echo -e "${GREEN}║    • LD_PRELOAD guard                                       ║${NC}"
-echo -e "${GREEN}║    • Audit rules (/etc/audit/rules.d/clawtower.rules)          ║${NC}"
+echo -e "${GREEN}║    • Audit rules (/etc/audit/rules.d/clawav.rules)          ║${NC}"
 echo -e "${GREEN}║    • Immutable file attributes                              ║${NC}"
 if ! $KEEP_DATA; then
 echo -e "${GREEN}║    • Logs and audit chain                                   ║${NC}"

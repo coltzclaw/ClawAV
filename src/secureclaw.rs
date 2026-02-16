@@ -394,7 +394,7 @@ impl SecureClawEngine {
 
     /// Check command specifically against dangerous command patterns
     /// Known-safe sudo commands that should not trigger alerts.
-    /// These are legitimate system operations (ClawTower scans, service management, etc.)
+    /// These are legitimate system operations (ClawAV scans, service management, etc.)
     const SUDO_ALLOWLIST: &'static [&'static str] = &[
         // Firewall management
         "sudo ufw",
@@ -567,10 +567,10 @@ impl SecureClawEngine {
         // User switching (common in deploy scripts)
         "sudo -u ",
         
-        // ClawTower specific
-        "sudo clawtower",
-        "sudo /usr/local/bin/clawtower",
-        "sudo /opt/clawtower/bin/clawtower",
+        // ClawAV specific
+        "sudo clawav",
+        "sudo /usr/local/bin/clawav",
+        "sudo /opt/clawav/bin/clawav",
     ];
 
     pub fn check_command(&self, cmd: &str) -> Vec<PatternMatch> {
@@ -980,7 +980,7 @@ mod tests {
         write_empty_files(&d);
         let e = SecureClawEngine::load(d.path()).unwrap();
         assert!(e.check_command("sudo ufw status").is_empty());
-        assert!(e.check_command("sudo systemctl status clawtower").is_empty());
+        assert!(e.check_command("sudo systemctl status clawav").is_empty());
         assert!(e.check_command("sudo journalctl -u ssh").is_empty());
         assert!(e.check_command("sudo apt update").is_empty());
     }

@@ -1,12 +1,12 @@
 //! Configuration loading and serialization.
 //!
-//! Defines the TOML configuration schema for ClawTower. The root [`Config`] struct
+//! Defines the TOML configuration schema for ClawAV. The root [`Config`] struct
 //! contains sections for each subsystem (auditd, network, falco, samhain, proxy,
 //! policy, secureclaw, sentinel, etc.).
 //!
 //! All sections implement `Default` and `serde::Deserialize` with `#[serde(default)]`
 //! so missing fields gracefully fall back to sensible defaults. Config is loaded
-//! from `/etc/clawtower/config.toml` by default.
+//! from `/etc/clawav/config.toml` by default.
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -113,7 +113,7 @@ pub struct GeneralConfig {
     pub watch_all_users: bool,
     /// Minimum severity for alerts ("info", "warning", "critical")
     pub min_alert_level: String,
-    /// Path to ClawTower's own log file
+    /// Path to ClawAV's own log file
     pub log_file: String,
 }
 
@@ -386,8 +386,8 @@ pub enum WatchPolicy {
 }
 
 fn default_sentinel_enabled() -> bool { true }
-fn default_quarantine_dir() -> String { "/etc/clawtower/quarantine".to_string() }
-fn default_shadow_dir() -> String { "/etc/clawtower/sentinel-shadow".to_string() }
+fn default_quarantine_dir() -> String { "/etc/clawav/quarantine".to_string() }
+fn default_shadow_dir() -> String { "/etc/clawav/sentinel-shadow".to_string() }
 fn default_debounce_ms() -> u64 { 200 }
 fn default_scan_content() -> bool { true }
 fn default_max_file_size_kb() -> u64 { 1024 }
@@ -584,7 +584,7 @@ pub struct OpenClawConfig {
 fn default_openclaw_config_path() -> String { "/home/openclaw/.openclaw/openclaw.json".to_string() }
 fn default_openclaw_state_dir() -> String { "/home/openclaw/.openclaw".to_string() }
 fn default_openclaw_audit_cmd() -> String { "openclaw security audit --deep".to_string() }
-fn default_openclaw_baseline_path() -> String { "/etc/clawtower/openclaw-config-baseline.json".to_string() }
+fn default_openclaw_baseline_path() -> String { "/etc/clawav/openclaw-config-baseline.json".to_string() }
 
 impl Default for OpenClawConfig {
     fn default() -> Self {
@@ -744,7 +744,7 @@ mod tests {
             [general]
             watched_user = "1000"
             min_alert_level = "info"
-            log_file = "/var/log/clawtower/watchdog.log"
+            log_file = "/var/log/clawav/watchdog.log"
 
             [slack]
             webhook_url = "https://hooks.slack.com/test"
@@ -757,7 +757,7 @@ mod tests {
 
             [network]
             log_path = "/var/log/syslog"
-            log_prefix = "CLAWTOWER_NET"
+            log_prefix = "CLAWAV_NET"
             enabled = true
 
             [scans]
@@ -789,7 +789,7 @@ mod tests {
             [general]
             watched_user = "1000"
             min_alert_level = "info"
-            log_file = "/var/log/clawtower/watchdog.log"
+            log_file = "/var/log/clawav/watchdog.log"
 
             [slack]
             webhook_url = "https://hooks.slack.com/test"
@@ -802,7 +802,7 @@ mod tests {
 
             [network]
             log_path = "/var/log/syslog"
-            log_prefix = "CLAWTOWER_NET"
+            log_prefix = "CLAWAV_NET"
             enabled = true
 
             [netpolicy]
@@ -834,7 +834,7 @@ mod tests {
             [general]
             watched_user = "1000"
             min_alert_level = "info"
-            log_file = "/var/log/clawtower/watchdog.log"
+            log_file = "/var/log/clawav/watchdog.log"
 
             [slack]
             webhook_url = "https://hooks.slack.com/test"
@@ -847,7 +847,7 @@ mod tests {
 
             [network]
             log_path = "/var/log/syslog"
-            log_prefix = "CLAWTOWER_NET"
+            log_prefix = "CLAWAV_NET"
             enabled = true
 
             [scans]
@@ -1141,7 +1141,7 @@ mod tests {
             [general]
             watched_user = "1000"
             min_alert_level = "info"
-            log_file = "/var/log/clawtower/watchdog.log"
+            log_file = "/var/log/clawav/watchdog.log"
             [slack]
             webhook_url = "https://hooks.slack.com/test"
             channel = "#devops"
@@ -1151,7 +1151,7 @@ mod tests {
             enabled = true
             [network]
             log_path = "/var/log/syslog"
-            log_prefix = "CLAWTOWER_NET"
+            log_prefix = "CLAWAV_NET"
             enabled = true
             [scans]
             interval = 3600
@@ -1220,7 +1220,7 @@ mod tests {
             [general]
             watched_user = "1000"
             min_alert_level = "info"
-            log_file = "/var/log/clawtower/watchdog.log"
+            log_file = "/var/log/clawav/watchdog.log"
 
             [slack]
             webhook_url = "https://hooks.slack.com/test"
@@ -1233,7 +1233,7 @@ mod tests {
 
             [network]
             log_path = "/var/log/syslog"
-            log_prefix = "CLAWTOWER_NET"
+            log_prefix = "CLAWAV_NET"
             enabled = true
 
             [scans]

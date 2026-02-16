@@ -883,12 +883,12 @@ pub fn scan_network_interfaces() -> ScanResult {
     }
 }
 
-/// Verify that the ClawTower systemd service has security hardening directives (NoNewPrivileges, ProtectSystem, etc.).
+/// Verify that the ClawAV systemd service has security hardening directives (NoNewPrivileges, ProtectSystem, etc.).
 pub fn scan_systemd_hardening() -> ScanResult {
     let mut issues = Vec::new();
 
-    // Check if ClawTower service has security hardening enabled
-    let service_file = "/etc/systemd/system/clawtower.service";
+    // Check if ClawAV service has security hardening enabled
+    let service_file = "/etc/systemd/system/clawav.service";
     if let Ok(content) = std::fs::read_to_string(service_file) {
         let security_features = [
             "NoNewPrivileges=true",
@@ -907,7 +907,7 @@ pub fn scan_systemd_hardening() -> ScanResult {
             }
         }
     } else {
-        issues.push("ClawTower service file not found".to_string());
+        issues.push("ClawAV service file not found".to_string());
     }
 
     // Check systemd version supports security features
@@ -1098,15 +1098,15 @@ pub fn parse_auditctl_status(output: &str) -> ScanResult {
     }
 }
 
-/// Verify ClawTower binary and config integrity against stored SHA-256 checksums.
+/// Verify ClawAV binary and config integrity against stored SHA-256 checksums.
 pub fn scan_integrity() -> ScanResult {
     // Check if binary exists and get its hash
-    let _binary_path = "/usr/local/bin/clawtower";
-    let _config_path = "/etc/clawtower/config.toml";
-    let checksums_path = "/etc/clawtower/checksums.sha256";
+    let _binary_path = "/usr/local/bin/clawav";
+    let _config_path = "/etc/clawav/config.toml";
+    let checksums_path = "/etc/clawav/checksums.sha256";
 
     if !std::path::Path::new(checksums_path).exists() {
-        return ScanResult::new("integrity", ScanStatus::Warn, "No checksums file found — run 'clawtower --store-checksums' to create baseline");
+        return ScanResult::new("integrity", ScanStatus::Warn, "No checksums file found — run 'clawav --store-checksums' to create baseline");
     }
 
     let stored = match std::fs::read_to_string(checksums_path) {
@@ -1174,11 +1174,11 @@ pub fn scan_ssh() -> ScanResult {
     }
 }
 
-/// List TCP listening sockets and flag any not in the expected set (ClawTower API port 18791).
+/// List TCP listening sockets and flag any not in the expected set (ClawAV API port 18791).
 pub fn scan_listening_services() -> ScanResult {
     match run_cmd("ss", &["-tlnp"]) {
         Ok(output) => {
-            let expected_ports = ["18791"]; // ClawTower API
+            let expected_ports = ["18791"]; // ClawAV API
             let mut unexpected = Vec::new();
             for line in output.lines().skip(1) {
                 let parts: Vec<&str> = line.split_whitespace().collect();
@@ -1348,7 +1348,7 @@ fn scan_user_persistence_inner(crontab_override: Option<&str>) -> Vec<ScanResult
 
     // 3. Shell RC file integrity
     {
-        let baselines_path = "/etc/clawtower/persistence-baselines.json";
+        let baselines_path = "/etc/clawav/persistence-baselines.json";
         let baselines: std::collections::HashMap<String, String> = std::fs::read_to_string(baselines_path)
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
@@ -1503,25 +1503,25 @@ fn scan_user_persistence_inner(crontab_override: Option<&str>) -> Vec<ScanResult
 /// Static entry point for running all security scans.
 pub struct SecurityScanner;
 
-/// Check that immutable (chattr +i) flags are set on critical ClawTower files.
+/// Check that immutable (chattr +i) flags are set on critical ClawAV files.
 /// Auto-remediates: if a file exists but lacks the immutable flag, sets it
 /// automatically and reports as a warning (not a failure).
 pub fn scan_immutable_flags() -> ScanResult {
     let critical_files = [
-        "/usr/local/bin/clawtower",
+        "/usr/local/bin/clawav",
         "/usr/local/bin/clawsudo",
-        "/usr/local/bin/clawtower-tray",
-        "/etc/clawtower/config.toml",
-        "/etc/clawtower/admin.key.hash",
-        "/etc/systemd/system/clawtower.service",
-        "/etc/sudoers.d/clawtower-deny",
+        "/usr/local/bin/clawav-tray",
+        "/etc/clawav/config.toml",
+        "/etc/clawav/admin.key.hash",
+        "/etc/systemd/system/clawav.service",
+        "/etc/sudoers.d/clawav-deny",
     ];
 
     // Files that may not exist (optional or created later)
     let optional_files = [
-        "/usr/local/bin/clawtower-tray",
-        "/etc/clawtower/admin.key.hash",
-        "/etc/sudoers.d/clawtower-deny",
+        "/usr/local/bin/clawav-tray",
+        "/etc/clawav/admin.key.hash",
+        "/etc/sudoers.d/clawav-deny",
     ];
 
     let mut missing = Vec::new();
@@ -1611,8 +1611,8 @@ pub fn scan_apparmor_protection() -> ScanResult {
     match run_cmd_with_sudo("aa-status", &[]) {
         Ok(output) => {
             let has_openclaw_profile = output.contains("openclaw")
-                || output.contains("clawtower.deny-openclaw");
-            let has_protect_profile = output.contains("clawtower.protect");
+                || output.contains("clawav.deny-openclaw");
+            let has_protect_profile = output.contains("clawav.protect");
 
             if has_openclaw_profile && has_protect_profile {
                 ScanResult::new(
@@ -1646,9 +1646,9 @@ pub fn scan_apparmor_protection() -> ScanResult {
 pub fn scan_secureclaw_sync() -> ScanResult {
     // Try configured path first, then common locations
     let candidates = [
-        "/home/openclaw/.openclaw/workspace/openclawtower/vendor/secureclaw",
+        "/home/openclaw/.openclaw/workspace/openclawav/vendor/secureclaw",
         "vendor/secureclaw",
-        "/opt/clawtower/vendor/secureclaw",
+        "/opt/clawav/vendor/secureclaw",
     ];
     let vendor_path = candidates.iter()
         .find(|p| std::path::Path::new(p).exists())
@@ -1748,11 +1748,11 @@ impl SecurityScanner {
         // Cognitive file integrity (returns Vec)
         // Load SecureClaw engine for cognitive content scanning
         let secureclaw_engine = crate::secureclaw::SecureClawEngine::load(
-            std::path::Path::new("/etc/clawtower/secureclaw")
+            std::path::Path::new("/etc/clawav/secureclaw")
         ).ok();
         results.extend(scan_cognitive_integrity(
             std::path::Path::new("/home/openclaw/.openclaw/workspace"),
-            std::path::Path::new("/etc/clawtower/cognitive-baselines.sha256"),
+            std::path::Path::new("/etc/clawav/cognitive-baselines.sha256"),
             secureclaw_engine.as_ref(),
         ));
         // OpenClaw-specific security checks
@@ -1928,12 +1928,12 @@ fn run_openclaw_audit(command: &str) -> Vec<ScanResult> {
 /// Check avahi-browse output for OpenClaw service advertisements (info leak).
 fn check_mdns_openclaw_leak(avahi_output: &str) -> ScanResult {
     let openclaw_services: Vec<&str> = avahi_output.lines()
-        .filter(|l| l.to_lowercase().contains("openclaw") || l.to_lowercase().contains("clawtower"))
+        .filter(|l| l.to_lowercase().contains("openclaw") || l.to_lowercase().contains("clawav"))
         .collect();
     
     if openclaw_services.is_empty() {
         ScanResult::new("openclaw:mdns", ScanStatus::Pass,
-            "No OpenClaw/ClawTower services advertised via mDNS")
+            "No OpenClaw/ClawAV services advertised via mDNS")
     } else {
         ScanResult::new("openclaw:mdns", ScanStatus::Warn,
             &format!("OpenClaw services advertised via mDNS (info leak): {}",
@@ -2324,12 +2324,12 @@ rules 0
 
     #[test]
     fn test_lsattr_immutable_flag_present() {
-        assert!(check_lsattr_immutable("----i---------e------- /usr/local/bin/clawtower"));
+        assert!(check_lsattr_immutable("----i---------e------- /usr/local/bin/clawav"));
     }
 
     #[test]
     fn test_lsattr_immutable_flag_missing() {
-        assert!(!check_lsattr_immutable("--------------e------- /usr/local/bin/clawtower"));
+        assert!(!check_lsattr_immutable("--------------e------- /usr/local/bin/clawav"));
     }
 
     #[test]
@@ -2869,8 +2869,8 @@ rules 0
     // --- mDNS detection ---
 
     #[test]
-    fn test_mdns_clawtower_exposed() {
-        let output = "+;eth0;IPv4;ClawTower Security;_http._tcp;local\n";
+    fn test_mdns_clawav_exposed() {
+        let output = "+;eth0;IPv4;ClawAV Security;_http._tcp;local\n";
         let result = check_mdns_openclaw_leak(output);
         assert_eq!(result.status, ScanStatus::Warn);
     }

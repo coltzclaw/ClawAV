@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# ClawTower Attack Simulation POC — SAFE, non-destructive
+# ClawAV Attack Simulation POC — SAFE, non-destructive
 # Run with: sudo bash scripts/poc-attack-sim.sh
 set -euo pipefail
 
-ALERTS="/var/log/clawtower/alerts.jsonl"
+ALERTS="/var/log/clawav/alerts.jsonl"
 WORKSPACE="/home/openclaw/.openclaw/workspace"
 
 if [[ ! -f "$ALERTS" ]]; then
-    echo "ERROR: ClawTower alerts log not found at $ALERTS"
+    echo "ERROR: ClawAV alerts log not found at $ALERTS"
     exit 1
 fi
 
 BEFORE=$(wc -l < "$ALERTS")
 echo "═══════════════════════════════════════════════════"
-echo "  ClawTower Attack Simulation POC"
+echo "  ClawAV Attack Simulation POC"
 echo "═══════════════════════════════════════════════════"
 echo "Starting alert count: $BEFORE"
 echo ""
@@ -39,7 +39,7 @@ check_alerts() {
 # ═══════════════════════════════════════════════════
 echo "[TEST 1] Cognitive file tampering — appending to SOUL.md..."
 cp "$WORKSPACE/SOUL.md" /tmp/soul-backup-poc.md
-echo -e "\n# INJECTED BY ATTACKER — this line should trigger ClawTower" >> "$WORKSPACE/SOUL.md"
+echo -e "\n# INJECTED BY ATTACKER — this line should trigger ClawAV" >> "$WORKSPACE/SOUL.md"
 sleep 5
 # Restore immediately
 cp /tmp/soul-backup-poc.md "$WORKSPACE/SOUL.md"
@@ -152,7 +152,7 @@ echo "════════════════════════�
 echo "  POC COMPLETE"
 echo "═══════════════════════════════════════════════════"
 echo ""
-echo "Review results above. Each test shows whether ClawTower"
+echo "Review results above. Each test shows whether ClawAV"
 echo "detected the simulated attack and at what severity."
 echo ""
 echo "All modifications have been restored to originals."

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Red Lobster — EXFIL Flag Test Suite
-# Tests whether ClawTower detects file copy operations on credential paths.
+# Tests whether ClawAV detects file copy operations on credential paths.
 # Authorized security test — run as the openclaw user.
 set -uo pipefail
 
-ALERT_LOG="/var/log/clawtower/alerts.jsonl"
+ALERT_LOG="/var/log/clawav/alerts.jsonl"
 TARGET="/home/openclaw/.openclaw/agents/main/agent/auth-profiles.json"
 OUTDIR="/tmp/redlobster/exfil"
 RESULTS="/tmp/redlobster/results/exfil.md"

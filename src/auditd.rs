@@ -16,23 +16,23 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
-/// Recommended auditd rules for ClawTower monitoring.
+/// Recommended auditd rules for ClawAV monitoring.
 ///
-/// Install these via `auditctl` or drop into `/etc/audit/rules.d/clawtower.rules`.
+/// Install these via `auditctl` or drop into `/etc/audit/rules.d/clawav.rules`.
 pub const RECOMMENDED_AUDIT_RULES: &[&str] = &[
     // Detect immutable-flag removal on protected files
-    "-w /usr/bin/chattr -p x -k clawtower-tamper",
-    // Protect ClawTower config files
-    "-w /etc/clawtower/ -p wa -k clawtower-config",
+    "-w /usr/bin/chattr -p x -k clawav-tamper",
+    // Protect ClawAV config files
+    "-w /etc/clawav/ -p wa -k clawav-config",
     // Monitor OpenClaw session log reads (prompt-injection / exfiltration vector)
     "-w /home/openclaw/.openclaw/agents/main/sessions/ -p r -k openclaw_session_read",
     // Credential file read monitoring (T2.1)
-    "-w /home/openclaw/.openclaw/agents/main/agent/auth-profiles.json -p r -k clawtower_cred_read",
-    "-w /home/openclaw/.aws/credentials -p r -k clawtower_cred_read",
-    "-w /home/openclaw/.aws/config -p r -k clawtower_cred_read",
-    "-w /home/openclaw/.ssh/id_ed25519 -p r -k clawtower_cred_read",
-    "-w /home/openclaw/.ssh/id_rsa -p r -k clawtower_cred_read",
-    "-w /home/openclaw/.openclaw/gateway.yaml -p r -k clawtower_cred_read",
+    "-w /home/openclaw/.openclaw/agents/main/agent/auth-profiles.json -p r -k clawav_cred_read",
+    "-w /home/openclaw/.aws/credentials -p r -k clawav_cred_read",
+    "-w /home/openclaw/.aws/config -p r -k clawav_cred_read",
+    "-w /home/openclaw/.ssh/id_ed25519 -p r -k clawav_cred_read",
+    "-w /home/openclaw/.ssh/id_rsa -p r -k clawav_cred_read",
+    "-w /home/openclaw/.openclaw/gateway.yaml -p r -k clawav_cred_read",
 ];
 
 use crate::alerts::{Alert, Severity};
@@ -229,10 +229,10 @@ pub fn parse_to_event(line: &str, watched_users: Option<&[String]>) -> Option<Pa
     }
 
     // Always allow tamper-detection events through regardless of user filter
-    let is_tamper = line.contains("key=\"clawtower-tamper\"")
-        || line.contains("key=clawtower-tamper")
-        || line.contains("key=\"clawtower-config\"")
-        || line.contains("key=clawtower-config");
+    let is_tamper = line.contains("key=\"clawav-tamper\"")
+        || line.contains("key=clawav-tamper")
+        || line.contains("key=\"clawav-config\"")
+        || line.contains("key=clawav-config");
 
     // For non-EXECVE lines, filter by watched users (unless tamper event)
     if !is_tamper {
@@ -305,11 +305,11 @@ pub fn parse_to_event(line: &str, watched_users: Option<&[String]>) -> Option<Pa
     None
 }
 
-/// Check if an audit event matches ClawTower tamper-detection keys
+/// Check if an audit event matches ClawAV tamper-detection keys
 pub fn check_tamper_event(event: &ParsedEvent) -> Option<Alert> {
     let line = &event.raw;
     // Detect auditd events with our tamper-detection keys
-    if line.contains("key=\"clawtower-tamper\"") || line.contains("key=clawtower-tamper") {
+    if line.contains("key=\"clawav-tamper\"") || line.contains("key=clawav-tamper") {
         let detail = event.command.as_deref()
             .or(event.file_path.as_deref())
             .unwrap_or(&line[..line.len().min(200)]);
@@ -319,19 +319,19 @@ pub fn check_tamper_event(event: &ParsedEvent) -> Option<Alert> {
             &format!("🚨 TAMPER DETECTED: chattr executed (possible immutable flag removal) — {}", detail),
         ));
     }
-    if line.contains("key=\"clawtower-config\"") || line.contains("key=clawtower-config") {
+    if line.contains("key=\"clawav-config\"") || line.contains("key=clawav-config") {
         let detail = event.file_path.as_deref()
             .or(event.command.as_deref())
             .unwrap_or(&line[..line.len().min(200)]);
         return Some(Alert::new(
             Severity::Critical,
             "auditd:tamper",
-            &format!("🚨 CONFIG TAMPER: write/attr change on protected ClawTower file — {}", detail),
+            &format!("🚨 CONFIG TAMPER: write/attr change on protected ClawAV file — {}", detail),
         ));
     }
     // Network connect() by suspicious binaries (T3.2)
     // Catches script files making outbound connections (python3 script.py, node app.js)
-    if (line.contains("key=\"clawtower_net\"") || line.contains("key=clawtower_net"))
+    if (line.contains("key=\"clawav_net\"") || line.contains("key=clawav_net"))
         && event.syscall_name == "connect"
     {
         let exe = extract_field(line, "exe").unwrap_or("unknown");
@@ -349,7 +349,7 @@ pub fn check_tamper_event(event: &ParsedEvent) -> Option<Alert> {
     }
 
     // Credential file read detection (T2.1)
-    if line.contains("key=\"clawtower_cred_read\"") || line.contains("key=clawtower_cred_read") {
+    if line.contains("key=\"clawav_cred_read\"") || line.contains("key=clawav_cred_read") {
         let detail = event.file_path.as_deref()
             .or(event.command.as_deref())
             .unwrap_or(&line[..line.len().min(200)]);
@@ -483,7 +483,7 @@ pub async fn tail_audit_log_with_behavior_and_policy(
             }
             Ok(_) => {
                 if let Some(event) = parse_to_event(&line, watched_users.as_deref()) {
-                    // Check for ClawTower tamper events (highest priority — fires for all users)
+                    // Check for ClawAV tamper events (highest priority — fires for all users)
                     if let Some(tamper_alert) = check_tamper_event(&event) {
                         let _ = tx.send(tamper_alert).await;
                     }
@@ -637,7 +637,7 @@ mod tests {
 
     #[test]
     fn test_tamper_detection_chattr_key() {
-        let line = r#"type=SYSCALL msg=audit(1707849600.123:456): arch=c00000b7 syscall=221 success=yes uid=0 exe="/usr/bin/chattr" key="clawtower-tamper""#;
+        let line = r#"type=SYSCALL msg=audit(1707849600.123:456): arch=c00000b7 syscall=221 success=yes uid=0 exe="/usr/bin/chattr" key="clawav-tamper""#;
         let event = parse_to_event(line, None).unwrap();
         let tamper = check_tamper_event(&event);
         assert!(tamper.is_some());
@@ -648,7 +648,7 @@ mod tests {
 
     #[test]
     fn test_tamper_detection_config_key() {
-        let line = r#"type=SYSCALL msg=audit(1707849600.123:456): arch=c00000b7 syscall=56 success=yes uid=0 name="/etc/clawtower/admin.key.hash" key="clawtower-config""#;
+        let line = r#"type=SYSCALL msg=audit(1707849600.123:456): arch=c00000b7 syscall=56 success=yes uid=0 name="/etc/clawav/admin.key.hash" key="clawav-config""#;
         let event = parse_to_event(line, None).unwrap();
         let tamper = check_tamper_event(&event);
         assert!(tamper.is_some());
@@ -660,7 +660,7 @@ mod tests {
     #[test]
     fn test_tamper_events_bypass_user_filter() {
         // Tamper events should be parsed even when watched_users doesn't include root
-        let line = r#"type=SYSCALL msg=audit(1707849600.123:456): arch=c00000b7 syscall=221 success=yes uid=0 exe="/usr/bin/chattr" key="clawtower-tamper""#;
+        let line = r#"type=SYSCALL msg=audit(1707849600.123:456): arch=c00000b7 syscall=221 success=yes uid=0 exe="/usr/bin/chattr" key="clawav-tamper""#;
         let event = parse_to_event(line, Some(&["1000".to_string()]));
         assert!(event.is_some(), "tamper events must bypass user filter");
     }
@@ -901,23 +901,23 @@ mod tests {
 
     #[test]
     fn test_tamper_key_without_quotes() {
-        let line = r#"type=SYSCALL msg=audit(1707849600.123:456): arch=c00000b7 syscall=221 success=yes uid=0 exe="/usr/bin/chattr" key=clawtower-tamper"#;
+        let line = r#"type=SYSCALL msg=audit(1707849600.123:456): arch=c00000b7 syscall=221 success=yes uid=0 exe="/usr/bin/chattr" key=clawav-tamper"#;
         let event = parse_to_event(line, None).unwrap();
         let tamper = check_tamper_event(&event);
-        assert!(tamper.is_some(), "key=clawtower-tamper (no quotes) should be detected");
+        assert!(tamper.is_some(), "key=clawav-tamper (no quotes) should be detected");
     }
 
     #[test]
     fn test_tamper_config_key_without_quotes() {
-        let line = r#"type=SYSCALL msg=audit(1707849600.123:456): arch=c00000b7 syscall=56 success=yes uid=0 key=clawtower-config"#;
+        let line = r#"type=SYSCALL msg=audit(1707849600.123:456): arch=c00000b7 syscall=56 success=yes uid=0 key=clawav-config"#;
         let event = parse_to_event(line, None).unwrap();
         let tamper = check_tamper_event(&event);
-        assert!(tamper.is_some(), "key=clawtower-config (no quotes) should be detected");
+        assert!(tamper.is_some(), "key=clawav-config (no quotes) should be detected");
     }
 
     #[test]
     fn test_tamper_key_in_middle_of_line() {
-        let line = r#"type=SYSCALL msg=audit(1707849600.123:456): arch=c00000b7 syscall=56 success=yes uid=0 key="clawtower-tamper" name="/usr/bin/chattr""#;
+        let line = r#"type=SYSCALL msg=audit(1707849600.123:456): arch=c00000b7 syscall=56 success=yes uid=0 key="clawav-tamper" name="/usr/bin/chattr""#;
         let event = parse_to_event(line, None).unwrap();
         let tamper = check_tamper_event(&event);
         assert!(tamper.is_some());
@@ -925,11 +925,11 @@ mod tests {
 
     #[test]
     fn test_tamper_similar_key_false_positive() {
-        // "clawtower-tamper-old" contains "clawtower-tamper" as substring
-        let line = r#"type=SYSCALL msg=audit(1707849600.123:456): arch=c00000b7 syscall=56 success=yes uid=0 key="clawtower-tamper-old""#;
+        // "clawav-tamper-old" contains "clawav-tamper" as substring
+        let line = r#"type=SYSCALL msg=audit(1707849600.123:456): arch=c00000b7 syscall=56 success=yes uid=0 key="clawav-tamper-old""#;
         let event = parse_to_event(line, None).unwrap();
         let tamper = check_tamper_event(&event);
-        // FINDING: any key containing "clawtower-tamper" as substring triggers
+        // FINDING: any key containing "clawav-tamper" as substring triggers
         if tamper.is_some() {
             // Substring match means potential false positive on similar keys
         }
@@ -937,7 +937,7 @@ mod tests {
 
     #[test]
     fn test_tamper_bypasses_user_filter_with_multiple_users() {
-        let line = r#"type=SYSCALL msg=audit(1707849600.123:456): arch=c00000b7 syscall=56 success=yes uid=9999 key="clawtower-config""#;
+        let line = r#"type=SYSCALL msg=audit(1707849600.123:456): arch=c00000b7 syscall=56 success=yes uid=9999 key="clawav-config""#;
         let watched = vec!["1000".to_string(), "1001".to_string()];
         let event = parse_to_event(line, Some(&watched));
         assert!(event.is_some(), "tamper events must bypass ALL user filters");
@@ -1120,7 +1120,7 @@ mod tests {
             args: vec![],
             file_path: None,
             success: true,
-            raw: r#"type=SYSCALL msg=audit(1707849600.123:456): arch=c00000b7 syscall=203 success=yes exe="/usr/bin/python3" key="clawtower_net""#.to_string(),
+            raw: r#"type=SYSCALL msg=audit(1707849600.123:456): arch=c00000b7 syscall=203 success=yes exe="/usr/bin/python3" key="clawav_net""#.to_string(),
             actor: Actor::Agent,
             ppid_exe: None,
         };
@@ -1137,7 +1137,7 @@ mod tests {
             args: vec![],
             file_path: None,
             success: true,
-            raw: r#"type=SYSCALL msg=audit(1707849600.123:456): arch=c00000b7 syscall=203 success=yes exe="/usr/bin/node" key="clawtower_net""#.to_string(),
+            raw: r#"type=SYSCALL msg=audit(1707849600.123:456): arch=c00000b7 syscall=203 success=yes exe="/usr/bin/node" key="clawav_net""#.to_string(),
             actor: Actor::Agent,
             ppid_exe: None,
         };
@@ -1154,7 +1154,7 @@ mod tests {
             args: vec![],
             file_path: None,
             success: true,
-            raw: r#"type=SYSCALL msg=audit(1707849600.123:456): arch=c00000b7 syscall=203 success=yes exe="/usr/bin/curl" key="clawtower_net""#.to_string(),
+            raw: r#"type=SYSCALL msg=audit(1707849600.123:456): arch=c00000b7 syscall=203 success=yes exe="/usr/bin/curl" key="clawav_net""#.to_string(),
             actor: Actor::Agent,
             ppid_exe: None,
         };

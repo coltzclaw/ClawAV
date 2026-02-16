@@ -67,21 +67,21 @@ fn run_elevated(args: &[&str]) {
     }
 }
 
-struct ClawTowerTray {
+struct ClawAVTray {
     state: Arc<Mutex<TrayState>>,
 }
 
-impl ksni::Tray for ClawTowerTray {
+impl ksni::Tray for ClawAVTray {
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
         vec![lobster_icon()]
     }
 
     fn title(&self) -> String {
-        "ClawTower".into()
+        "ClawAV".into()
     }
 
     fn id(&self) -> String {
-        "clawtower-tray".into()
+        "clawav-tray".into()
     }
 
     fn tool_tip(&self) -> ksni::ToolTip {
@@ -94,7 +94,7 @@ impl ksni::Tray for ClawTowerTray {
             "Running"
         };
         ksni::ToolTip {
-            title: format!("ClawTower v{VERSION} — {status}"),
+            title: format!("ClawAV v{VERSION} — {status}"),
             description: format!("Alerts: {}", st.alerts_total),
             ..Default::default()
         }
@@ -128,7 +128,7 @@ impl ksni::Tray for ClawTowerTray {
         vec![
             // --- Status section ---
             StandardItem {
-                label: format!("ClawTower v{VERSION} — {status}"),
+                label: format!("ClawAV v{VERSION} — {status}"),
                 enabled: false,
                 ..Default::default()
             }
@@ -151,11 +151,11 @@ impl ksni::Tray for ClawTowerTray {
                 label: "Open TUI".into(),
                 activate: Box::new(|_| {
                     let _ = Command::new("x-terminal-emulator")
-                        .args(["-e", "clawtower"])
+                        .args(["-e", "clawav"])
                         .spawn()
                         .or_else(|_| {
                             Command::new("lxterminal")
-                                .args(["-e", "clawtower"])
+                                .args(["-e", "clawav"])
                                 .spawn()
                         });
                 }),
@@ -189,7 +189,7 @@ impl ksni::Tray for ClawTowerTray {
                 label: pause_label.into(),
                 activate: Box::new(|_| {
                     thread::spawn(|| {
-                        run_elevated(&["clawtower-ctl", "toggle-pause"]);
+                        run_elevated(&["clawav-ctl", "toggle-pause"]);
                     });
                 }),
                 ..Default::default()
@@ -200,7 +200,7 @@ impl ksni::Tray for ClawTowerTray {
                 label: "Quit \u{1f513}".into(),
                 activate: Box::new(|_| {
                     thread::spawn(|| {
-                        run_elevated(&["systemctl", "stop", "clawtower"]);
+                        run_elevated(&["systemctl", "stop", "clawav"]);
                         std::process::exit(0);
                     });
                 }),
@@ -247,7 +247,7 @@ fn poll_status(client: &Client, state: &Arc<Mutex<TrayState>>) {
 }
 
 fn main() {
-    eprintln!("ClawTower Tray v{VERSION} starting...");
+    eprintln!("ClawAV Tray v{VERSION} starting...");
 
     let state = Arc::new(Mutex::new(TrayState::default()));
     let poll_state = Arc::clone(&state);
@@ -261,7 +261,7 @@ fn main() {
         }
     });
 
-    let service = ksni::TrayService::new(ClawTowerTray { state });
+    let service = ksni::TrayService::new(ClawAVTray { state });
     if let Err(e) = service.run() {
         eprintln!("TrayService failed: {e}");
         std::process::exit(1);

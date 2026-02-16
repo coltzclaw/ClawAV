@@ -1,24 +1,24 @@
 #!/bin/bash
 set -euo pipefail
 
-RULES_FILE="/etc/audit/rules.d/clawtower.rules"
+RULES_FILE="/etc/audit/rules.d/clawav.rules"
 
 cat > "$RULES_FILE" << 'EOF'
-# ClawTower tamper detection rules
-# Watch for attribute changes on ClawTower binary (chattr -i attempts)
--w /usr/local/bin/clawtower -p a -k clawtower-tamper
+# ClawAV tamper detection rules
+# Watch for attribute changes on ClawAV binary (chattr -i attempts)
+-w /usr/local/bin/clawav -p a -k clawav-tamper
 
-# Watch for writes/attribute changes to ClawTower config
--w /etc/clawtower/ -p wa -k clawtower-config
+# Watch for writes/attribute changes to ClawAV config
+-w /etc/clawav/ -p wa -k clawav-config
 
 # Watch for changes to the service file
--w /etc/systemd/system/clawtower.service -p wa -k clawtower-tamper
+-w /etc/systemd/system/clawav.service -p wa -k clawav-tamper
 
 # Watch for changes to the sudoers deny file
--w /etc/sudoers.d/clawtower-deny -p wa -k clawtower-tamper
+-w /etc/sudoers.d/clawav-deny -p wa -k clawav-tamper
 
 # Watch for changes to AppArmor profile
--w /etc/apparmor.d/clawtower.deny-agent -p wa -k clawtower-tamper
+-w /etc/apparmor.d/clawav.deny-agent -p wa -k clawav-tamper
 EOF
 
 # Reload audit rules

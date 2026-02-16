@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# ClawTower Setup Script — One-shot install
+# ClawAV Setup Script — One-shot install
 #
 # Usage:
 #   sudo bash scripts/setup.sh                    # Install pre-built binaries
 #   sudo bash scripts/setup.sh --source           # Build from source + install
 #   sudo bash scripts/setup.sh --source --auto    # Full unattended: build + install + start
 #
-# Reversible. Run `clawtower harden` to lock down, `clawtower uninstall` to remove.
+# Reversible. Run `clawav harden` to lock down, `clawav uninstall` to remove.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -45,21 +45,21 @@ die()  { echo -e "${RED}[ERROR]${NC} $*" >&2; exit 1; }
 
 echo ""
 echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}║                🛡️  ClawTower Setup                             ║${NC}"
+echo -e "${CYAN}║                🛡️  ClawAV Setup                             ║${NC}"
 echo -e "${CYAN}║                                                              ║${NC}"
 if $BUILD_FROM_SOURCE; then
 echo -e "${CYAN}║  Mode: BUILD FROM SOURCE                                     ║${NC}"
 else
 echo -e "${CYAN}║  Mode: INSTALL PRE-BUILT BINARIES                            ║${NC}"
 fi
-echo -e "${CYAN}║  Reversible — use 'clawtower uninstall' to remove.              ║${NC}"
+echo -e "${CYAN}║  Reversible — use 'clawav uninstall' to remove.              ║${NC}"
 echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
 # ── Preflight ─────────────────────────────────────────────────────────────────
 [[ $EUID -eq 0 ]] || die "Must run as root (sudo bash scripts/setup.sh)"
 
-CLAWTOWER_BIN="$PROJECT_DIR/target/release/clawtower"
+CLAWAV_BIN="$PROJECT_DIR/target/release/clawav"
 CLAWSUDO_BIN="$PROJECT_DIR/target/release/clawsudo"
 
 # ── Build from source (if requested) ─────────────────────────────────────────
@@ -105,14 +105,14 @@ if $BUILD_FROM_SOURCE; then
     fi
     info "Rust: $(rustc --version 2>/dev/null)"
 
-    log "Building ClawTower (this takes ~1 min on Pi, ~10s on desktop)..."
+    log "Building ClawAV (this takes ~1 min on Pi, ~10s on desktop)..."
     cd "$PROJECT_DIR"
     cargo build --release 2>&1 | tail -5
-    [[ -f "$CLAWTOWER_BIN" ]] || die "Build failed"
-    info "Built: clawtower ($(du -h "$CLAWTOWER_BIN" | cut -f1)), clawsudo ($(du -h "$CLAWSUDO_BIN" | cut -f1))"
+    [[ -f "$CLAWAV_BIN" ]] || die "Build failed"
+    info "Built: clawav ($(du -h "$CLAWAV_BIN" | cut -f1)), clawsudo ($(du -h "$CLAWSUDO_BIN" | cut -f1))"
 else
-    [[ -f "$CLAWTOWER_BIN" ]] || die "Binary not found at $CLAWTOWER_BIN — build first or use --source"
-    info "Using pre-built: clawtower ($(du -h "$CLAWTOWER_BIN" | cut -f1)), clawsudo ($(du -h "$CLAWSUDO_BIN" | cut -f1))"
+    [[ -f "$CLAWAV_BIN" ]] || die "Binary not found at $CLAWAV_BIN — build first or use --source"
+    info "Using pre-built: clawav ($(du -h "$CLAWAV_BIN" | cut -f1)), clawsudo ($(du -h "$CLAWSUDO_BIN" | cut -f1))"
 fi
 
 # ── Install auditd ───────────────────────────────────────────────────────────
@@ -124,37 +124,37 @@ fi
 
 # ── Create directories ───────────────────────────────────────────────────────
 log "Creating directories..."
-mkdir -p /etc/clawtower/policies /var/log/clawtower /var/run/clawtower
+mkdir -p /etc/clawav/policies /var/log/clawav /var/run/clawav
 # Ensure agent user can read logs and write to runtime dir
-chown -R "${SUDO_USER:-root}:${SUDO_USER:-root}" /var/log/clawtower /var/run/clawtower 2>/dev/null || true
+chown -R "${SUDO_USER:-root}:${SUDO_USER:-root}" /var/log/clawav /var/run/clawav 2>/dev/null || true
 
 # ── Stop existing service (avoid "Text file busy") ───────────────────────────
-if systemctl is-active --quiet clawtower 2>/dev/null; then
-    log "Stopping existing ClawTower service..."
-    systemctl stop clawtower
+if systemctl is-active --quiet clawav 2>/dev/null; then
+    log "Stopping existing ClawAV service..."
+    systemctl stop clawav
     sleep 1
 fi
 
 # ── Install binaries ─────────────────────────────────────────────────────────
 log "Installing binaries..."
-rm -f /usr/local/bin/clawtower /usr/local/bin/clawsudo
-cp "$CLAWTOWER_BIN" /usr/local/bin/clawtower
+rm -f /usr/local/bin/clawav /usr/local/bin/clawsudo
+cp "$CLAWAV_BIN" /usr/local/bin/clawav
 cp "$CLAWSUDO_BIN" /usr/local/bin/clawsudo
-chmod 755 /usr/local/bin/clawtower /usr/local/bin/clawsudo
+chmod 755 /usr/local/bin/clawav /usr/local/bin/clawsudo
 
 # ── Install config (preserve existing) ───────────────────────────────────────
-if [[ -f /etc/clawtower/config.toml ]]; then
-    warn "Config exists — keeping /etc/clawtower/config.toml"
+if [[ -f /etc/clawav/config.toml ]]; then
+    warn "Config exists — keeping /etc/clawav/config.toml"
 else
     log "Installing default config..."
-    cp "$PROJECT_DIR/config.toml" /etc/clawtower/config.toml
+    cp "$PROJECT_DIR/config.toml" /etc/clawav/config.toml
 fi
-chmod 644 /etc/clawtower/config.toml
+chmod 644 /etc/clawav/config.toml
 
 # ── Install policies ─────────────────────────────────────────────────────────
 if [[ -d "$PROJECT_DIR/policies" ]]; then
     log "Installing policy files..."
-    cp "$PROJECT_DIR/policies/"*.yaml /etc/clawtower/policies/ 2>/dev/null || true
+    cp "$PROJECT_DIR/policies/"*.yaml /etc/clawav/policies/ 2>/dev/null || true
 fi
 
 # ── Build LD_PRELOAD guard (source mode only) ────────────────────────────────
@@ -172,20 +172,20 @@ fi
 
 # ── Install systemd service ──────────────────────────────────────────────────
 log "Installing systemd service..."
-cat > /etc/systemd/system/clawtower.service <<'EOF'
+cat > /etc/systemd/system/clawav.service <<'EOF'
 [Unit]
-Description=ClawTower Security Watchdog
+Description=ClawAV Security Watchdog
 After=network.target auditd.service
 Wants=auditd.service
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/clawtower run --headless /etc/clawtower/config.toml
+ExecStart=/usr/local/bin/clawav run --headless /etc/clawav/config.toml
 Restart=always
 RestartSec=5
 NoNewPrivileges=true
-ReadWritePaths=/var/log/clawtower /var/run/clawtower /etc/clawtower
-RuntimeDirectory=clawtower
+ReadWritePaths=/var/log/clawav /var/run/clawav /etc/clawav
+RuntimeDirectory=clawav
 RuntimeDirectoryMode=0750
 StandardOutput=journal
 StandardError=journal
@@ -195,7 +195,7 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable clawtower
+systemctl enable clawav
 
 # ── Set up auditd rules ──────────────────────────────────────────────────────
 if command -v auditctl &>/dev/null && [[ -f "$SCRIPT_DIR/setup-auditd.sh" ]]; then
@@ -205,44 +205,44 @@ fi
 
 # ── Auto-start ────────────────────────────────────────────────────────────────
 if $AUTO_START; then
-    log "Starting ClawTower..."
-    systemctl restart clawtower
+    log "Starting ClawAV..."
+    systemctl restart clawav
     sleep 2
-    if systemctl is-active --quiet clawtower; then
-        info "✅ ClawTower is running!"
+    if systemctl is-active --quiet clawav; then
+        info "✅ ClawAV is running!"
         echo ""
-        journalctl -u clawtower -n 10 --no-pager 2>/dev/null || true
+        journalctl -u clawav -n 10 --no-pager 2>/dev/null || true
     else
-        warn "Service failed to start — check: journalctl -u clawtower -n 20"
+        warn "Service failed to start — check: journalctl -u clawav -n 20"
     fi
 fi
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${GREEN}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║  ✅ ClawTower setup complete!                                  ║${NC}"
+echo -e "${GREEN}║  ✅ ClawAV setup complete!                                  ║${NC}"
 echo -e "${GREEN}╠══════════════════════════════════════════════════════════════╣${NC}"
 echo -e "${GREEN}║                                                              ║${NC}"
 echo -e "${GREEN}║  Commands:                                                   ║${NC}"
-echo -e "${GREEN}║    clawtower help             Show all commands                ║${NC}"
-echo -e "${GREEN}║    clawtower configure        Set up Slack, users, modules     ║${NC}"
-echo -e "${GREEN}║    clawtower scan             Quick security scan              ║${NC}"
-echo -e "${GREEN}║    clawtower status           Service status + alerts          ║${NC}"
-echo -e "${GREEN}║    clawtower tui              Interactive dashboard            ║${NC}"
-echo -e "${GREEN}║    clawtower logs             Tail live logs                   ║${NC}"
+echo -e "${GREEN}║    clawav help             Show all commands                ║${NC}"
+echo -e "${GREEN}║    clawav configure        Set up Slack, users, modules     ║${NC}"
+echo -e "${GREEN}║    clawav scan             Quick security scan              ║${NC}"
+echo -e "${GREEN}║    clawav status           Service status + alerts          ║${NC}"
+echo -e "${GREEN}║    clawav tui              Interactive dashboard            ║${NC}"
+echo -e "${GREEN}║    clawav logs             Tail live logs                   ║${NC}"
 echo -e "${GREEN}║                                                              ║${NC}"
 echo -e "${GREEN}║  Service:                                                    ║${NC}"
-echo -e "${GREEN}║    sudo systemctl start clawtower     Start                    ║${NC}"
-echo -e "${GREEN}║    sudo systemctl stop clawtower      Stop                     ║${NC}"
+echo -e "${GREEN}║    sudo systemctl start clawav     Start                    ║${NC}"
+echo -e "${GREEN}║    sudo systemctl stop clawav      Stop                     ║${NC}"
 echo -e "${GREEN}║                                                              ║${NC}"
 echo -e "${GREEN}║  Next:                                                       ║${NC}"
-echo -e "${GREEN}║    1. clawtower configure              Set your Slack webhook  ║${NC}"
-echo -e "${GREEN}║    2. sudo systemctl start clawtower   Start monitoring        ║${NC}"
-echo -e "${GREEN}║    3. clawtower scan                   Verify security posture ║${NC}"
+echo -e "${GREEN}║    1. clawav configure              Set your Slack webhook  ║${NC}"
+echo -e "${GREEN}║    2. sudo systemctl start clawav   Start monitoring        ║${NC}"
+echo -e "${GREEN}║    3. clawav scan                   Verify security posture ║${NC}"
 echo -e "${GREEN}║                                                              ║${NC}"
 echo -e "${GREEN}║  Optional:                                                   ║${NC}"
-echo -e "${GREEN}║    clawtower harden           Lock down (admin key required)   ║${NC}"
-echo -e "${GREEN}║    clawtower uninstall        Remove (admin key required)      ║${NC}"
+echo -e "${GREEN}║    clawav harden           Lock down (admin key required)   ║${NC}"
+echo -e "${GREEN}║    clawav uninstall        Remove (admin key required)      ║${NC}"
 echo -e "${GREEN}║                                                              ║${NC}"
 echo -e "${GREEN}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""

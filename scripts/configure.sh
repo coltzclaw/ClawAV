@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# ClawTower Interactive Configuration
+# ClawAV Interactive Configuration
 # Walks you through setting up config.toml with prompts.
 set -euo pipefail
 
-CONFIG="${1:-/etc/clawtower/config.toml}"
+CONFIG="${1:-/etc/clawav/config.toml}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -44,7 +44,7 @@ set_toml() {
 
 echo ""
 echo -e "${GREEN}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║           🛡️  ClawTower Configuration                          ║${NC}"
+echo -e "${GREEN}║           🛡️  ClawAV Configuration                          ║${NC}"
 echo -e "${GREEN}║                                                              ║${NC}"
 echo -e "${GREEN}║  Press Enter to keep the current/default value.              ║${NC}"
 echo -e "${GREEN}╚══════════════════════════════════════════════════════════════╝${NC}"
@@ -110,6 +110,6 @@ echo ""
 echo -e "${GREEN}✅ Config updated: $CONFIG${NC}"
 echo ""
 echo -e "  Review:   ${CYAN}cat $CONFIG${NC}"
-echo -e "  Start:    ${CYAN}sudo systemctl start clawtower${NC}"
-echo -e "  TUI:      ${CYAN}clawtower $CONFIG${NC}"
+echo -e "  Start:    ${CYAN}sudo systemctl start clawav${NC}"
+echo -e "  TUI:      ${CYAN}clawav $CONFIG${NC}"
 echo ""

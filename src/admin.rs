@@ -1,6 +1,6 @@
-//! Admin socket and key management for authenticated ClawTower control.
+//! Admin socket and key management for authenticated ClawAV control.
 //!
-//! Provides a Unix domain socket (`/var/run/clawtower/admin.sock`) that accepts
+//! Provides a Unix domain socket (`/var/run/clawav/admin.sock`) that accepts
 //! JSON commands authenticated with an Argon2-hashed admin key. On first run,
 //! a 256-bit key is generated and displayed once — the hash is stored, the key
 //! is never persisted.
@@ -206,7 +206,7 @@ impl AdminSocket {
         let listener = UnixListener::bind(&self.socket_path)
             .with_context(|| format!("Failed to bind admin socket at {}", self.socket_path.display()))?;
 
-        // Set permissions: owner clawtower, group openclaw, mode 0660
+        // Set permissions: owner clawav, group openclaw, mode 0660
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -375,7 +375,7 @@ async fn process_request(
             };
             AdminResponse {
                 ok: true,
-                message: "ClawTower running".into(),
+                message: "ClawAV running".into(),
                 data: Some(serde_json::json!({
                     "status": "running",
                     "paused_seconds_remaining": paused,

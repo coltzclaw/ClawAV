@@ -190,17 +190,17 @@ pub async fn run_aggregator(
 
     // Initialize JSONL alert log path
     let alerts_log_path = if unsafe { libc::getuid() } == 0 {
-        "/var/log/clawtower/alerts.jsonl".to_string()
+        "/var/log/clawav/alerts.jsonl".to_string()
     } else {
-        format!("/tmp/clawtower-{}/alerts.jsonl", unsafe { libc::getuid() })
+        format!("/tmp/clawav-{}/alerts.jsonl", unsafe { libc::getuid() })
     };
     let _ = std::fs::create_dir_all(std::path::Path::new(&alerts_log_path).parent().unwrap_or(std::path::Path::new("/tmp")));
 
     // Initialize audit chain
     let chain_path = if unsafe { libc::getuid() } == 0 {
-        "/var/log/clawtower/audit.chain".to_string()
+        "/var/log/clawav/audit.chain".to_string()
     } else {
-        format!("/tmp/clawtower-{}/audit.chain", unsafe { libc::getuid() })
+        format!("/tmp/clawav-{}/audit.chain", unsafe { libc::getuid() })
     };
     let mut audit_chain = match crate::audit_chain::AuditChain::new(&chain_path) {
         Ok(chain) => Some(chain),

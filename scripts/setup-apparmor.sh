@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ClawTower — AppArmor Profile Setup for OpenClaw Agent
+# ClawAV — AppArmor Profile Setup for OpenClaw Agent
 # Installs and enforces AppArmor profiles:
-#   1. usr.bin.openclaw — restricts openclaw user from accessing ClawTower files
-#   2. etc.clawtower.protect — restricts common tools from modifying /etc/clawtower/
+#   1. usr.bin.openclaw — restricts openclaw user from accessing ClawAV files
+#   2. etc.clawav.protect — restricts common tools from modifying /etc/clawav/
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROFILE_SRC="${SCRIPT_DIR}/../apparmor/usr.bin.openclaw"
 PROFILE_DST="/etc/apparmor.d/usr.bin.openclaw"
-PROTECT_SRC="${SCRIPT_DIR}/../apparmor/etc.clawtower.protect"
-PROTECT_DST="/etc/apparmor.d/etc.clawtower.protect"
+PROTECT_SRC="${SCRIPT_DIR}/../apparmor/etc.clawav.protect"
+PROTECT_DST="/etc/apparmor.d/etc.clawav.protect"
 
 log()  { echo "[AppArmor] $*"; }
 warn() { echo "[AppArmor WARN] $*"; }
 
-echo "=== ClawTower AppArmor Setup ==="
+echo "=== ClawAV AppArmor Setup ==="
 
 # Check for root
 if [[ $EUID -ne 0 ]]; then
@@ -28,7 +28,7 @@ if ! command -v apparmor_parser &>/dev/null; then
     log "apparmor_parser not found. Attempting install..."
     apt-get update -qq && apt-get install -y apparmor apparmor-utils 2>/dev/null || {
         warn "Could not install AppArmor — skipping AppArmor setup entirely"
-        log "INFO: ClawTower will still function. chattr +i and auditd provide primary protection."
+        log "INFO: ClawAV will still function. chattr +i and auditd provide primary protection."
         exit 0
     }
 fi
@@ -65,9 +65,9 @@ if [[ -f "${PROTECT_SRC}" ]]; then
     cp "${PROTECT_SRC}" "${PROTECT_DST}"
     log "Installed ${PROTECT_DST}"
     apparmor_parser -r "${PROTECT_DST}" 2>/dev/null && {
-        log "Profile etc.clawtower.protect loaded"
+        log "Profile etc.clawav.protect loaded"
     } || {
-        warn "Failed to load etc.clawtower.protect (non-fatal — will load on boot)"
+        warn "Failed to load etc.clawav.protect (non-fatal — will load on boot)"
     }
 else
     log "Config protection profile not found at ${PROTECT_SRC} — skipping"

@@ -279,7 +279,7 @@ impl App {
                             message: format!("Save config to {}", path_str),
                             status: SudoStatus::WaitingForPassword,
                         });
-                        let _ = config.save(&PathBuf::from("/tmp/clawtower-config-save.toml"));
+                        let _ = config.save(&PathBuf::from("/tmp/clawav-config-save.toml"));
                     }
                 }
                 return;
@@ -384,7 +384,7 @@ impl App {
         let shell_cmd: String = if action.starts_with("save_config:") {
             let path = &action["save_config:".len()..];
             format!(
-                "chattr -i '{}' 2>/dev/null; cp /tmp/clawtower-config-save.toml '{}' && chattr +i '{}' && rm -f /tmp/clawtower-config-save.toml && echo 'CONFIG_SAVED'",
+                "chattr -i '{}' 2>/dev/null; cp /tmp/clawav-config-save.toml '{}' && chattr +i '{}' && rm -f /tmp/clawav-config-save.toml && echo 'CONFIG_SAVED'",
                 path, path, path
             )
         } else {
@@ -907,7 +907,7 @@ fn render_system_tab(f: &mut Frame, area: Rect, app: &App) {
 
     let text = vec![
         Line::from(vec![
-            Span::styled(format!("ClawTower v{}", env!("CARGO_PKG_VERSION")), Style::default().fg(Color::Cyan).bold()),
+            Span::styled(format!("ClawAV v{}", env!("CARGO_PKG_VERSION")), Style::default().fg(Color::Cyan).bold()),
         ]),
         Line::from(""),
         Line::from(vec![
@@ -1034,7 +1034,7 @@ fn ui(f: &mut Frame, app: &App) {
     // Tab bar
     let titles: Vec<Line> = app.tab_titles.iter().map(|t| Line::from(t.as_str())).collect();
     let tabs = Tabs::new(titles)
-        .block(Block::default().borders(Borders::ALL).title(" 🛡️ ClawTower "))
+        .block(Block::default().borders(Borders::ALL).title(" 🛡️ ClawAV "))
         .select(app.selected_tab)
         .style(Style::default().fg(Color::White))
         .highlight_style(Style::default().fg(Color::Cyan).bold());

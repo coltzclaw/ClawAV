@@ -1,4 +1,4 @@
-//! ClawTower — Tamper-proof security watchdog for AI agents.
+//! ClawAV — Tamper-proof security watchdog for AI agents.
 //!
 //! This is the main entry point. It handles CLI argument parsing, privilege escalation
 //! via `sudo`, and orchestrates the async runtime that spawns all monitoring subsystems:
@@ -63,10 +63,10 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 fn print_help() {
-    eprintln!(r#"🛡️  ClawTower — Tamper-proof security watchdog for AI agents
+    eprintln!(r#"🛡️  ClawAV — Tamper-proof security watchdog for AI agents
 
 USAGE:
-    clawtower [COMMAND] [OPTIONS]
+    clawav [COMMAND] [OPTIONS]
 
 COMMANDS:
     run                  Start the watchdog with TUI dashboard (default)
@@ -77,44 +77,44 @@ COMMANDS:
     scan                 Run a one-shot security scan and exit
     verify-key           Verify admin key from stdin (or --key flag)
     verify-audit [PATH]  Verify audit chain integrity
-    setup                Install ClawTower as a system service
+    setup                Install ClawAV as a system service
     setup --source       Build from source + install
     setup --auto         Install + start service automatically
     harden               Apply tamper-proof "swallowed key" hardening
-    uninstall            Reverse hardening + remove ClawTower (requires admin key)
+    uninstall            Reverse hardening + remove ClawAV (requires admin key)
     sync                 Update SecureClaw pattern databases
     logs                 Tail the service logs (journalctl)
     help                 Show this help message
     version              Show version info
 
 EXAMPLES:
-    clawtower                           Start TUI dashboard
-    clawtower run --headless            Run as background daemon
-    clawtower configure                 Set up Slack, watched users, etc.
-    clawtower scan                      Quick security scan
-    sudo clawtower update               Self-update to latest release
-    clawtower update --check            Check for updates without installing
-    clawtower setup --source --auto     Full unattended install from source
-    clawtower status                    Check if service is running
+    clawav                           Start TUI dashboard
+    clawav run --headless            Run as background daemon
+    clawav configure                 Set up Slack, watched users, etc.
+    clawav scan                      Quick security scan
+    sudo clawav update               Self-update to latest release
+    clawav update --check            Check for updates without installing
+    clawav setup --source --auto     Full unattended install from source
+    clawav status                    Check if service is running
 
 CONFIG:
-    Default config path: /etc/clawtower/config.toml
-    Override with:       clawtower run /path/to/config.toml
+    Default config path: /etc/clawav/config.toml
+    Override with:       clawav run /path/to/config.toml
 "#);
 }
 
 fn print_version() {
-    eprintln!("ClawTower v{}", env!("CARGO_PKG_VERSION"));
+    eprintln!("ClawAV v{}", env!("CARGO_PKG_VERSION"));
     eprintln!("Tamper-proof security watchdog for AI agents");
-    eprintln!("https://github.com/coltz108/ClawTower");
+    eprintln!("https://github.com/coltz108/ClawAV");
 }
 
 /// Find the scripts directory relative to the binary or fallback locations
 fn find_scripts_dir() -> Option<PathBuf> {
     // Check relative to binary location
     if let Ok(exe) = std::env::current_exe() {
-        // Binary at /usr/local/bin/clawtower → scripts at source dir
-        // Binary at target/release/clawtower → scripts at ../../scripts
+        // Binary at /usr/local/bin/clawav → scripts at source dir
+        // Binary at target/release/clawav → scripts at ../../scripts
         let parent = exe.parent()?;
         let candidate = parent.join("../../scripts");
         if candidate.join("configure.sh").exists() {
@@ -123,10 +123,10 @@ fn find_scripts_dir() -> Option<PathBuf> {
     }
     // Check common locations
     let candidates = [
-        PathBuf::from("/home/openclaw/.openclaw/workspace/projects/ClawTower/scripts"),
-        PathBuf::from("/home/openclaw/.openclaw/workspace/openclawtower/scripts"),
+        PathBuf::from("/home/openclaw/.openclaw/workspace/projects/ClawAV/scripts"),
+        PathBuf::from("/home/openclaw/.openclaw/workspace/openclawav/scripts"),
         PathBuf::from("./scripts"),
-        PathBuf::from("/opt/clawtower/scripts"),
+        PathBuf::from("/opt/clawav/scripts"),
     ];
     for c in &candidates {
         if c.join("configure.sh").exists() || c.join("uninstall.sh").exists() {
@@ -140,27 +140,27 @@ fn download_script(name: &str) -> Result<PathBuf> {
     let version = env!("CARGO_PKG_VERSION");
     let tag = format!("v{}", version);
     let url = format!(
-        "https://raw.githubusercontent.com/coltz108/ClawTower/{}/scripts/{}",
+        "https://raw.githubusercontent.com/coltz108/ClawAV/{}/scripts/{}",
         tag, name
     );
     eprintln!("Downloading {} from GitHub ({})...", name, tag);
     let output = std::process::Command::new("curl")
-        .args(["-sSL", "-f", "-o", &format!("/tmp/clawtower-{}", name), &url])
+        .args(["-sSL", "-f", "-o", &format!("/tmp/clawav-{}", name), &url])
         .status()?;
     if !output.success() {
         // Fall back to main branch
         let url_main = format!(
-            "https://raw.githubusercontent.com/coltz108/ClawTower/main/scripts/{}",
+            "https://raw.githubusercontent.com/coltz108/ClawAV/main/scripts/{}",
             name
         );
         let output2 = std::process::Command::new("curl")
-            .args(["-sSL", "-f", "-o", &format!("/tmp/clawtower-{}", name), &url_main])
+            .args(["-sSL", "-f", "-o", &format!("/tmp/clawav-{}", name), &url_main])
             .status()?;
         if !output2.success() {
             anyhow::bail!("Failed to download script '{}' from GitHub", name);
         }
     }
-    let path = PathBuf::from(format!("/tmp/clawtower-{}", name));
+    let path = PathBuf::from(format!("/tmp/clawav-{}", name));
     Ok(path)
 }
 
@@ -196,8 +196,8 @@ fn ensure_root() {
     if unsafe { libc::getuid() } != 0
         && !matches!(subcommand, "help" | "--help" | "-h" | "version" | "--version" | "-V")
     {
-        eprintln!("🛡️  ClawTower requires root privileges. Escalating via sudo...\n");
-        let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("clawtower"));
+        eprintln!("🛡️  ClawAV requires root privileges. Escalating via sudo...\n");
+        let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("clawav"));
         let status = std::process::Command::new("sudo")
             .arg("--")
             .arg(&exe)
@@ -250,7 +250,7 @@ async fn async_main() -> Result<()> {
                 eprintln!("No key provided");
                 std::process::exit(1);
             }
-            let hash_path = std::path::Path::new("/etc/clawtower/admin.key.hash");
+            let hash_path = std::path::Path::new("/etc/clawav/admin.key.hash");
             let hash = match std::fs::read_to_string(hash_path) {
                 Ok(h) => h.trim().to_string(),
                 Err(e) => {
@@ -288,14 +288,14 @@ async fn async_main() -> Result<()> {
         }
         "logs" => {
             let status = std::process::Command::new("journalctl")
-                .args(["-u", "clawtower", "-f", "--no-pager"])
+                .args(["-u", "clawav", "-f", "--no-pager"])
                 .status()?;
             std::process::exit(status.code().unwrap_or(1));
         }
         "status" => {
             // Show service status
             let _ = std::process::Command::new("systemctl")
-                .args(["status", "clawtower", "--no-pager"])
+                .args(["status", "clawav", "--no-pager"])
                 .status();
             eprintln!("");
             // Show recent alerts from API if available
@@ -314,7 +314,7 @@ async fn async_main() -> Result<()> {
         "scan" => {
             // Run one-shot scan and print results
             let results = scanner::SecurityScanner::run_all_scans();
-            eprintln!("🛡️  ClawTower Security Scan");
+            eprintln!("🛡️  ClawAV Security Scan");
             eprintln!("========================");
             for r in &results {
                 let icon = match r.status {
@@ -340,28 +340,28 @@ async fn async_main() -> Result<()> {
     let run_args: Vec<&String> = if subcommand == "run" {
         rest_args.iter().collect()
     } else {
-        // Called as `clawtower /path/to/config.toml` or `clawtower --headless`
+        // Called as `clawav /path/to/config.toml` or `clawav --headless`
         args.iter().skip(1).collect()
     };
 
     let config_path = run_args.iter()
         .find(|a| !a.starts_with("--"))
         .map(|s| PathBuf::from(s.as_str()))
-        .unwrap_or_else(|| PathBuf::from("/etc/clawtower/config.toml"));
+        .unwrap_or_else(|| PathBuf::from("/etc/clawav/config.toml"));
 
     let headless = run_args.iter().any(|a| a.as_str() == "--headless");
 
     // If running in TUI mode, stop the background service to avoid port/socket conflicts
     if !headless {
         let service_was_running = std::process::Command::new("systemctl")
-            .args(["is-active", "--quiet", "clawtower"])
+            .args(["is-active", "--quiet", "clawav"])
             .status()
             .map(|s| s.success())
             .unwrap_or(false);
         if service_was_running {
-            eprintln!("Stopping clawtower service for TUI mode...");
+            eprintln!("Stopping clawav service for TUI mode...");
             let _ = std::process::Command::new("sudo")
-                .args(["systemctl", "stop", "clawtower"])
+                .args(["systemctl", "stop", "clawav"])
                 .status();
             // Brief pause for sockets to release
             std::thread::sleep(std::time::Duration::from_millis(500));
@@ -369,12 +369,12 @@ async fn async_main() -> Result<()> {
         // Re-start on exit via drop guard
         if service_was_running {
             // We'll restart in the cleanup section after TUI exits
-            std::env::set_var("CLAWTOWER_RESTART_SERVICE", "1");
+            std::env::set_var("CLAWAV_RESTART_SERVICE", "1");
         }
     }
 
     let config_d = config_path.parent()
-        .unwrap_or(Path::new("/etc/clawtower"))
+        .unwrap_or(Path::new("/etc/clawav"))
         .join("config.d");
     let config = Config::load_with_overrides(&config_path, &config_d)?;
     eprintln!("Config loaded (with overlays from {})", config_d.display());
@@ -391,7 +391,7 @@ async fn async_main() -> Result<()> {
     // Load policy engine
     let policy_engine = if config.policy.enabled {
         let policy_dir = std::path::Path::new(&config.policy.dir);
-        let system_dir = std::path::Path::new("/etc/clawtower/policies");
+        let system_dir = std::path::Path::new("/etc/clawav/policies");
         match policy::PolicyEngine::load_dirs(&[policy_dir, system_dir]) {
             Ok(engine) => {
                 eprintln!("Policy engine loaded: {} rules", engine.rule_count());
@@ -594,19 +594,19 @@ async fn async_main() -> Result<()> {
     }
 
     // Initialize admin key and spawn admin socket
-    let admin_key_hash_path = PathBuf::from("/etc/clawtower/admin.key.hash");
+    let admin_key_hash_path = PathBuf::from("/etc/clawav/admin.key.hash");
     if let Err(e) = admin::init_admin_key(&admin_key_hash_path) {
         eprintln!("Admin key init: {} (non-fatal, admin socket will still start)", e);
     }
-    // Use /var/run/clawtower/ if accessible, otherwise fall back to /tmp/
-    let socket_dir = PathBuf::from("/var/run/clawtower");
+    // Use /var/run/clawav/ if accessible, otherwise fall back to /tmp/
+    let socket_dir = PathBuf::from("/var/run/clawav");
     let socket_path = if socket_dir.exists() && std::fs::metadata(&socket_dir).map(|m| {
         use std::os::unix::fs::MetadataExt;
         m.uid() == unsafe { libc::getuid() } || unsafe { libc::getuid() } == 0
     }).unwrap_or(false) {
         socket_dir.join("admin.sock")
     } else {
-        let fallback = PathBuf::from(format!("/tmp/clawtower-{}/admin.sock", unsafe { libc::getuid() }));
+        let fallback = PathBuf::from(format!("/tmp/clawav-{}/admin.sock", unsafe { libc::getuid() }));
         if let Some(parent) = fallback.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
@@ -640,7 +640,7 @@ async fn async_main() -> Result<()> {
         let sentinel_config = config.sentinel.clone();
         let sentinel_tx = raw_tx.clone();
         let secureclaw_engine = crate::secureclaw::SecureClawEngine::load(
-            std::path::Path::new("/etc/clawtower/secureclaw")
+            std::path::Path::new("/etc/clawav/secureclaw")
         ).ok().map(std::sync::Arc::new);
         
         tokio::spawn(async move {
@@ -666,13 +666,13 @@ async fn async_main() -> Result<()> {
     }
 
     // Send startup alert (through aggregator)
-    let startup = Alert::new(Severity::Info, "system", "ClawTower watchdog started");
+    let startup = Alert::new(Severity::Info, "system", "ClawAV watchdog started");
     let _ = raw_tx.send(startup).await;
 
     if headless {
         // Headless mode: just drain alerts and log them
         let mut alert_rx = alert_rx;
-        eprintln!("ClawTower running in headless mode (Ctrl+C to stop)");
+        eprintln!("ClawAV running in headless mode (Ctrl+C to stop)");
         loop {
             tokio::select! {
                 Some(alert) = alert_rx.recv() => {
@@ -690,10 +690,10 @@ async fn async_main() -> Result<()> {
     }
 
     // Restart the background service if we stopped it for TUI mode
-    if std::env::var("CLAWTOWER_RESTART_SERVICE").is_ok() {
-        eprintln!("Restarting clawtower service...");
+    if std::env::var("CLAWAV_RESTART_SERVICE").is_ok() {
+        eprintln!("Restarting clawav service...");
         let _ = std::process::Command::new("sudo")
-            .args(["systemctl", "start", "clawtower"])
+            .args(["systemctl", "start", "clawav"])
             .status();
     }
 

@@ -1,8 +1,8 @@
 //! Falco eBPF/syscall alert integration.
 //!
-//! Tails a Falco JSON log file and converts entries into ClawTower alerts.
+//! Tails a Falco JSON log file and converts entries into ClawAV alerts.
 //! Falco priority levels (EMERGENCY, ALERT, CRITICAL, etc.) are mapped to
-//! ClawTower severity levels. Waits for the log file to appear if Falco is not
+//! ClawAV severity levels. Waits for the log file to appear if Falco is not
 //! yet running.
 
 use anyhow::Result;

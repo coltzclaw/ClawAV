@@ -3,7 +3,7 @@
 //! Every alert that passes through the aggregator is appended to a JSONL file
 //! where each entry contains a SHA-256 hash linking it to the previous entry
 //! (blockchain-style). This makes post-hoc deletion or modification of individual
-//! entries detectable via `clawtower verify-audit`.
+//! entries detectable via `clawav verify-audit`.
 //!
 //! The genesis entry uses a zero hash as its prev_hash.
 
@@ -173,7 +173,7 @@ impl AuditChain {
 
 /// Run verify-audit subcommand
 pub fn run_verify_audit(path: Option<&str>) -> Result<()> {
-    let path = path.unwrap_or("/var/log/clawtower/audit.chain");
+    let path = path.unwrap_or("/var/log/clawav/audit.chain");
     let path = Path::new(path);
 
     match AuditChain::verify(path) {

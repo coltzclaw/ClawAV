@@ -1,4 +1,4 @@
-# ClawTower Default Detection Policies
+# ClawAV Default Detection Policies
 #
 # Philosophy: Flag genuinely suspicious behavior, not normal operations.
 # The agent (Claw/OpenClaw) runs commands via bash -c — that's normal.
@@ -123,8 +123,8 @@ rules:
     description: "Alert on disabling security services"
     match:
       command_contains:
-        - "systemctl stop clawtower"
-        - "systemctl disable clawtower"
+        - "systemctl stop clawav"
+        - "systemctl disable clawav"
         - "systemctl stop apparmor"
         - "systemctl disable apparmor"
         - "systemctl stop auditd"
@@ -133,9 +133,9 @@ rules:
         - "systemctl disable fail2ban"
     action: critical
 
-  # ── ClawTower Tamper Detection ────────────────────────────────────────────────
-  - name: "deny-clawtower-tamper"
-    description: "Detect attempts to modify ClawTower itself"
+  # ── ClawAV Tamper Detection ────────────────────────────────────────────────
+  - name: "deny-clawav-tamper"
+    description: "Detect attempts to modify ClawAV itself"
     match:
       command_contains:
         - "chattr -i"
@@ -143,22 +143,22 @@ rules:
         - "auditctl -D"
         - "auditctl -e 0"
         - "apparmor_parser -R"
-        - "systemctl mask clawtower"
-        - "rm /usr/local/bin/clawtower"
+        - "systemctl mask clawav"
+        - "rm /usr/local/bin/clawav"
         - "rm /usr/local/bin/clawsudo"
-        - "rm -rf /etc/clawtower"
+        - "rm -rf /etc/clawav"
     action: critical
 
-  - name: "deny-clawtower-config-write"
-    description: "Detect writes to ClawTower config files"
+  - name: "deny-clawav-config-write"
+    description: "Detect writes to ClawAV config files"
     match:
       command_contains:
-        - "sed -i /etc/clawtower/"
-        - "tee /etc/clawtower/"
-        - "vim /etc/clawtower/"
-        - "nano /etc/clawtower/"
-        - "vi /etc/clawtower/"
-        - "chattr -i /etc/clawtower/"
+        - "sed -i /etc/clawav/"
+        - "tee /etc/clawav/"
+        - "vim /etc/clawav/"
+        - "nano /etc/clawav/"
+        - "vi /etc/clawav/"
+        - "chattr -i /etc/clawav/"
     action: critical
 
   # ── Privilege Escalation ───────────────────────────────────────────────────

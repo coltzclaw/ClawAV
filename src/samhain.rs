@@ -1,8 +1,8 @@
 //! Samhain file integrity monitoring integration.
 //!
-//! Tails the Samhain log file and converts entries into ClawTower alerts.
+//! Tails the Samhain log file and converts entries into ClawAV alerts.
 //! Samhain severity prefixes (CRIT, ALERT, WARN, NOTICE, INFO) are mapped
-//! to ClawTower severity levels. Waits for the log file to appear if Samhain
+//! to ClawAV severity levels. Waits for the log file to appear if Samhain
 //! is not yet running.
 
 use anyhow::Result;
