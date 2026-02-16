@@ -431,7 +431,7 @@ impl Default for SentinelConfig {
                 WatchPathConfig {
                     path: "/home/openclaw/.openclaw/workspace/MEMORY.md".to_string(),
                     patterns: vec!["*".to_string()],
-                    policy: WatchPolicy::Watched,
+                    policy: WatchPolicy::Protected,
                 },
                 WatchPathConfig {
                     path: "/home/openclaw/.openclaw/workspace/IDENTITY.md".to_string(),
@@ -923,13 +923,10 @@ mod tests {
     }
 
     #[test]
-    fn test_sentinel_defaults_memory_watched() {
+    fn test_sentinel_defaults_memory_protected() {
         let config = SentinelConfig::default();
-        let memory = config.watch_paths.iter()
-            .find(|w| w.path.contains("MEMORY.md"))
-            .expect("MEMORY.md must be watched");
-        assert_eq!(memory.policy, WatchPolicy::Watched,
-            "MEMORY.md should be Watched (mutable working document)");
+        let mem = config.watch_paths.iter().find(|w| w.path.ends_with("MEMORY.md")).unwrap();
+        assert!(matches!(mem.policy, WatchPolicy::Protected), "MEMORY.md should be Protected to prevent shadow poisoning");
     }
 
     #[test]

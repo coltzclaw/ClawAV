@@ -203,24 +203,21 @@ kernel.yama.ptrace_scope = ${PTRACE_VALUE}
 SYSCTL
 sysctl -p /etc/sysctl.d/99-clawav.conf 2>/dev/null && log "  sysctl params applied" || warn "Some sysctl params may need reboot"
 
-# ── 8. Restricted sudoers ────────────────────────────────────────────────────
-log "Installing sudoers restrictions..."
-cat > /etc/sudoers.d/clawav-deny <<'SUDOERS'
-# Deny openclaw user from tampering with ClawAV
-openclaw ALL=(ALL) !  /usr/bin/systemctl stop clawav, \
-                      /usr/bin/systemctl disable clawav, \
-                      /usr/bin/systemctl mask clawav, \
-                      /usr/bin/chattr -i /usr/local/bin/clawav, \
-                      /usr/bin/chattr -i /etc/clawav/*, \
-                      /usr/bin/chattr -i /etc/systemd/system/clawav.service, \
-                      /usr/sbin/ufw disable, \
-                      /usr/sbin/auditctl -e 0, \
-                      /usr/sbin/auditctl -e 1
-SUDOERS
-chmod 0440 /etc/sudoers.d/clawav-deny
+# ── 8. Restricted sudoers (Tier 1 hardened) ──────────────────────────────────
+log "Installing hardened sudoers from policies/sudoers-openclaw.conf..."
+# Remove old deny-list approach if present
+if [[ -f /etc/sudoers.d/clawav-deny ]]; then
+    chattr -i /etc/sudoers.d/clawav-deny 2>/dev/null || true
+    rm -f /etc/sudoers.d/clawav-deny
+fi
+SUDOERS_SRC="$(dirname "$(realpath "$0")")/../policies/sudoers-openclaw.conf"
+SUDOERS_DEST="/etc/sudoers.d/010_openclaw"
+chattr -i "$SUDOERS_DEST" 2>/dev/null || true
+cp "$SUDOERS_SRC" "$SUDOERS_DEST"
+chmod 0440 "$SUDOERS_DEST"
 # Validate sudoers
-visudo -cf /etc/sudoers.d/clawav-deny || die "Invalid sudoers file!"
-chattr +i /etc/sudoers.d/clawav-deny
+visudo -cf "$SUDOERS_DEST" || die "Invalid sudoers file!"
+chattr +i "$SUDOERS_DEST"
 
 # ── 9. Lock audit rules ─────────────────────────────────────────────────────
 log "Locking audit rules (immutable until reboot)..."

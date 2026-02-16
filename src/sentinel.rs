@@ -483,14 +483,14 @@ mod tests {
         let workspace = tmp.join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
 
-        let mem_path = workspace.join("MEMORY.md");
-        let original = "Original memory.\n";
-        std::fs::write(&mem_path, original).unwrap();
+        let tools_path = workspace.join("TOOLS.md");
+        let original = "Original tools.\n";
+        std::fs::write(&tools_path, original).unwrap();
 
         let config = SentinelConfig {
             enabled: true,
             watch_paths: vec![WatchPathConfig {
-                path: mem_path.to_string_lossy().to_string(),
+                path: tools_path.to_string_lossy().to_string(),
                 patterns: vec!["*".to_string()],
                 policy: WatchPolicy::Watched,
             }],
@@ -506,18 +506,18 @@ mod tests {
         let (tx, mut rx) = mpsc::channel::<Alert>(16);
         let sentinel = Sentinel::new(config, tx, None).unwrap();
 
-        let new_content = "Updated memory content.\n";
-        std::fs::write(&mem_path, new_content).unwrap();
-        sentinel.handle_change(&mem_path.to_string_lossy()).await;
+        let new_content = "Updated tools content.\n";
+        std::fs::write(&tools_path, new_content).unwrap();
+        sentinel.handle_change(&tools_path.to_string_lossy()).await;
 
         // File should keep new content
-        let current = std::fs::read_to_string(&mem_path).unwrap();
+        let current = std::fs::read_to_string(&tools_path).unwrap();
         assert_eq!(current, new_content);
 
         // Shadow should be updated to new content
         let shadow = shadow_path_for(
             &shadow_dir.to_string_lossy(),
-            &mem_path.to_string_lossy(),
+            &tools_path.to_string_lossy(),
         );
         let shadow_content = std::fs::read_to_string(&shadow).unwrap();
         assert_eq!(shadow_content, new_content);
@@ -526,6 +526,57 @@ mod tests {
         let alert = rx.try_recv().unwrap();
         assert_eq!(alert.severity, Severity::Warning);
         assert!(alert.message.contains("Cognitive file modified"));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[tokio::test]
+    async fn test_handle_change_memory_protected_quarantines() {
+        let tmp = std::env::temp_dir().join("sentinel_test_memory_protected");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let shadow_dir = tmp.join("shadow");
+        let quarantine_dir = tmp.join("quarantine");
+        let workspace = tmp.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+
+        let mem_path = workspace.join("MEMORY.md");
+        let original = "Original memory content.\n";
+        std::fs::write(&mem_path, original).unwrap();
+
+        let config = SentinelConfig {
+            enabled: true,
+            watch_paths: vec![WatchPathConfig {
+                path: mem_path.to_string_lossy().to_string(),
+                patterns: vec!["*".to_string()],
+                policy: WatchPolicy::Protected,
+            }],
+            quarantine_dir: quarantine_dir.to_string_lossy().to_string(),
+            shadow_dir: shadow_dir.to_string_lossy().to_string(),
+            debounce_ms: 200,
+            scan_content: false,
+            max_file_size_kb: 1024,
+            content_scan_excludes: vec![],
+            exclude_content_scan: vec![],
+        };
+
+        let (tx, mut rx) = mpsc::channel::<Alert>(16);
+        let sentinel = Sentinel::new(config, tx, None).unwrap();
+
+        // Write malicious content
+        std::fs::write(&mem_path, "SHADOW POISONED CONTENT\n").unwrap();
+        sentinel.handle_change(&mem_path.to_string_lossy()).await;
+
+        // File should be restored to original
+        let restored = std::fs::read_to_string(&mem_path).unwrap();
+        assert_eq!(restored, original);
+
+        // Quarantine dir should have a file
+        let q_entries: Vec<_> = std::fs::read_dir(&quarantine_dir).unwrap().collect();
+        assert!(!q_entries.is_empty(), "quarantine should have a file");
+
+        // Alert should be Critical
+        let alert = rx.try_recv().unwrap();
+        assert_eq!(alert.severity, Severity::Critical);
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
