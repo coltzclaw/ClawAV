@@ -277,3 +277,6 @@ echo -e "${GREEN}║    • Kernel module loading                               
 echo -e "${GREEN}║    • Audit rule locks                                       ║${NC}"
 echo -e "${GREEN}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
+
+# Success — remove uninstall log (no need to keep on clean uninstall)
+rm -f "$UNINSTALL_LOG" 2>/dev/null || true
