@@ -181,6 +181,15 @@ else
     log "  rpcbind already inactive"
 fi
 
+# Remove agent user from docker group (docker group = root)
+AGENT_USER="${CLAWAV_AGENT_USER:-openclaw}"
+if id -nG "$AGENT_USER" 2>/dev/null | grep -qw docker; then
+    gpasswd -d "$AGENT_USER" docker 2>/dev/null || true
+    log "  Removed $AGENT_USER from docker group"
+else
+    log "  $AGENT_USER not in docker group"
+fi
+
 # ── 7. Kernel hardening via sysctl ───────────────────────────────────────────
 log "Setting kernel hardening parameters..."
 

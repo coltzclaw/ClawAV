@@ -359,6 +359,12 @@ TRAYEOF
         log "  rpcbind already inactive"
     fi
 
+    # Remove agent user from docker group (docker group = root)
+    if [[ -n "$AGENT_USERNAME" ]] && id -nG "$AGENT_USERNAME" 2>/dev/null | grep -qw docker; then
+        gpasswd -d "$AGENT_USERNAME" docker 2>/dev/null || true
+        log "  Removed $AGENT_USERNAME from docker group"
+    fi
+
     # Re-set immutable flags
     log "Re-setting immutable flags..."
     chattr +i /usr/local/bin/clawav
