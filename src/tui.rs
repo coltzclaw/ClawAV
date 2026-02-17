@@ -554,7 +554,10 @@ impl App {
                     if config.save(path).is_ok() {
                         self.config_saved_message = Some("Saved!".to_string());
                     } else if nix_is_root() {
-                        self.config_saved_message = Some("Save failed!".to_string());
+                        // File is likely immutable (chattr +i) — do the chattr dance directly
+                        let _ = config.save(&PathBuf::from("/tmp/clawtower-config-save.toml"));
+                        let path_str = path.display().to_string();
+                        self.run_sudo_action(&format!("save_config:{}", path_str), "");
                     } else {
                         let path_str = path.display().to_string();
                         self.sudo_popup = Some(SudoPopup {
