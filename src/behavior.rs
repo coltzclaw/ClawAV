@@ -1204,30 +1204,21 @@ pub fn classify_behavior(event: &ParsedEvent) -> Option<(BehaviorCategory, Sever
     }
 
     // --- CRITICAL: Financial / Crypto theft ---
-    for path in CRYPTO_WALLET_PATHS {
-        if cmd.contains(path) {
-            return Some((BehaviorCategory::FinancialTheft, Severity::Critical));
+    if let Some(ref cmd) = event.command {
+        let cmd_lower = cmd.to_lowercase();
+        for path in CRYPTO_WALLET_PATHS {
+            if cmd.contains(path) {
+                return Some((BehaviorCategory::FinancialTheft, Severity::Critical));
+            }
         }
-    }
-    for pattern in CRYPTO_KEY_PATTERNS {
-        if cmd_lower.contains(&pattern.to_lowercase()) {
-            return Some((BehaviorCategory::FinancialTheft, Severity::Critical));
+        for pattern in CRYPTO_KEY_PATTERNS {
+            if cmd_lower.contains(&pattern.to_lowercase()) {
+                return Some((BehaviorCategory::FinancialTheft, Severity::Critical));
+            }
         }
-    }
-    for tool in CRYPTO_CLI_TOOLS {
-        if cmd_lower.starts_with(tool) || cmd_lower.contains(&format!("/{}", tool)) {
-            return Some((BehaviorCategory::FinancialTheft, Severity::Warning));
-        }
-    }
-
-        // --- WARNING: MCP config tampering ---
-        if event.syscall_name == "openat" || event.syscall_name == "rename" || event.syscall_name == "unlink" {
-            if let Some(ref fp) = event.file_path {
-                for pattern in MCP_TAMPER_PATTERNS {
-                    if fp.contains(pattern) {
-                        return Some((BehaviorCategory::SecurityTamper, Severity::Warning));
-                    }
-                }
+        for tool in CRYPTO_CLI_TOOLS {
+            if cmd_lower.starts_with(tool) || cmd_lower.contains(&format!("/{}", tool)) {
+                return Some((BehaviorCategory::FinancialTheft, Severity::Warning));
             }
         }
         // Also catch write commands targeting MCP configs
@@ -1240,8 +1231,21 @@ pub fn classify_behavior(event: &ParsedEvent) -> Option<(BehaviorCategory, Sever
                 }
             }
         }
+    }
 
-        // --- WARNING: Unauthorized external actions ---
+    // --- WARNING: MCP config tampering via file operations ---
+    if event.syscall_name == "openat" || event.syscall_name == "rename" || event.syscall_name == "unlink" {
+        if let Some(ref fp) = event.file_path {
+            for pattern in MCP_TAMPER_PATTERNS {
+                if fp.contains(pattern) {
+                    return Some((BehaviorCategory::SecurityTamper, Severity::Warning));
+                }
+            }
+        }
+    }
+
+    // --- WARNING: Unauthorized external actions ---
+    if let Some(ref cmd) = event.command {
         for pattern in DESTRUCTIVE_EXTERNAL_TOOLS {
             if cmd.contains(pattern) {
                 return Some((BehaviorCategory::DataExfiltration, Severity::Warning));
@@ -1252,6 +1256,7 @@ pub fn classify_behavior(event: &ParsedEvent) -> Option<(BehaviorCategory, Sever
                 return Some((BehaviorCategory::DataExfiltration, Severity::Info));
             }
         }
+    }
 
     None
 }
