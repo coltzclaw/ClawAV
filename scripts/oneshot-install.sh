@@ -604,8 +604,10 @@ Wants=auditd.service
 [Service]
 Type=simple
 ExecStart=/usr/local/bin/clawtower --headless --config /etc/clawtower/config.toml
-Restart=always
+Restart=on-failure
 RestartSec=5
+KillMode=control-group
+TimeoutStopSec=15
 StandardOutput=journal
 StandardError=journal
 
