@@ -183,6 +183,16 @@ const CONTAINER_ESCAPE_PATTERNS: &[&str] = &[
 /// Container escape binaries
 const CONTAINER_ESCAPE_BINARIES: &[&str] = &["nsenter", "unshare", "runc", "ctr", "crictl"];
 
+/// Kernel module loading (priv esc / rootkit installation)
+const KERNEL_MODULE_COMMANDS: &[&str] = &["insmod", "modprobe"];
+
+/// Process identity masking patterns (stealth — hide real process name)
+const PROCESS_MASKING_PATTERNS: &[&str] = &[
+    "prctl(15",     // PR_SET_NAME = 15
+    "prctl.15",
+    "PR_SET_NAME",
+];
+
 /// Crypto wallet file paths — access by agent is suspicious
 const CRYPTO_WALLET_PATHS: &[&str] = &[
     ".ethereum/keystore",
@@ -668,6 +678,47 @@ pub fn classify_behavior(event: &ParsedEvent) -> Option<(BehaviorCategory, Sever
             }
         }
 
+        // --- CRITICAL: sudo + interpreter chains (Flag 8 escalation) ---
+        if binary == "sudo" && args.len() > 1 {
+            let sudo_target = args[1].rsplit('/').next().unwrap_or(&args[1]);
+            if NETWORK_CAPABLE_RUNTIMES.iter().any(|&r| sudo_target.eq_ignore_ascii_case(r)) {
+                let full_cmd = args.join(" ");
+                // setuid/seteuid/setreuid = priv esc chain
+                if full_cmd.contains("setuid") || full_cmd.contains("seteuid")
+                    || full_cmd.contains("setreuid") || full_cmd.contains("os.setuid")
+                    || full_cmd.contains("Process.euid") || full_cmd.contains("Process::UID") {
+                    return Some((BehaviorCategory::PrivilegeEscalation, Severity::Critical));
+                }
+                // Server creation under sudo = elevated service
+                if full_cmd.contains("createServer") || full_cmd.contains("http.server")
+                    || full_cmd.contains("HTTPServer") || full_cmd.contains(".listen(")
+                    || full_cmd.contains("bind(") || full_cmd.contains("TCPServer")
+                    || full_cmd.contains("SimpleHTTPServer") {
+                    return Some((BehaviorCategory::PrivilegeEscalation, Severity::Critical));
+                }
+                // Any sudo + interpreter is at minimum a Warning
+                return Some((BehaviorCategory::PrivilegeEscalation, Severity::Warning));
+            }
+        }
+
+        // --- CRITICAL: Kernel module loading (rootkit / priv esc) ---
+        if KERNEL_MODULE_COMMANDS.iter().any(|&c| binary.eq_ignore_ascii_case(c)) {
+            return Some((BehaviorCategory::PrivilegeEscalation, Severity::Critical));
+        }
+
+        // --- WARNING: Process identity masking (comm rename via prctl) ---
+        if NETWORK_CAPABLE_RUNTIMES.iter().any(|&c| binary.eq_ignore_ascii_case(c)) {
+            if let Some(ref cmd) = event.command {
+                if PROCESS_MASKING_PATTERNS.iter().any(|p| cmd.contains(p)) {
+                    return Some((BehaviorCategory::SecurityTamper, Severity::Warning));
+                }
+                // memfd_create = fileless execution (Flag 11)
+                if cmd.contains("memfd_create") || cmd.contains("MFD_CLOEXEC") {
+                    return Some((BehaviorCategory::SecurityTamper, Severity::Critical));
+                }
+            }
+        }
+
         // --- CRITICAL: LD_PRELOAD bypass attempts ---
         if let Some(ref cmd) = event.command {
             // Direct manipulation of preload config
@@ -977,9 +1028,23 @@ pub fn classify_behavior(event: &ParsedEvent) -> Option<(BehaviorCategory, Sever
             }
         }
 
-        // --- CRITICAL: Network-capable runtimes with suspicious args ---
+        // --- CRITICAL: Interpreter credential file access (behavior-layer fallback) ---
+        // Catches interpreter-based credential reads even when auditd file watches
+        // are stale (inode changed). Fires on any runtime whose args reference
+        // credential paths — covers ctypes, fs.readFileSync, File.read, shutil, etc.
         if NETWORK_CAPABLE_RUNTIMES.iter().any(|&c| binary.eq_ignore_ascii_case(c)) {
             let full_cmd = args.join(" ");
+            // Check if any argument references a credential or sensitive path
+            let all_cred_paths: Vec<&str> = CRITICAL_READ_PATHS.iter()
+                .chain(AGENT_SENSITIVE_PATHS.iter())
+                .copied()
+                .collect();
+            for cred_path in &all_cred_paths {
+                if full_cmd.contains(cred_path) {
+                    return Some((BehaviorCategory::DataExfiltration, Severity::Critical));
+                }
+            }
+
             // Check for scripted exfil patterns
             for pattern in SCRIPTED_EXFIL_PATTERNS {
                 if full_cmd.contains(pattern) {
@@ -1106,6 +1171,31 @@ pub fn classify_behavior(event: &ParsedEvent) -> Option<(BehaviorCategory, Sever
                     return Some((BehaviorCategory::DataExfiltration, Severity::Critical));
                 }
             }
+        }
+    }
+
+    // --- CRITICAL: memfd_create syscall (fileless execution) ---
+    if event.syscall_name == "memfd_create" && event.success {
+        return Some((BehaviorCategory::SecurityTamper, Severity::Critical));
+    }
+
+    // --- sendfile/copy_file_range/sendto from interpreters ---
+    // These syscalls don't carry file paths in auditd events, so we detect them
+    // by checking if the process or its parent is a runtime interpreter.
+    // sendto catches UDP exfil (DNS TXT tunneling, ctypes raw sockets).
+    if ["sendfile", "copy_file_range", "sendto"].contains(&event.syscall_name.as_str()) && event.success {
+        let is_interpreter = |exe: &str| -> bool {
+            let base = exe.rsplit('/').next().unwrap_or(exe);
+            NETWORK_CAPABLE_RUNTIMES.iter().any(|&r| base.starts_with(r))
+        };
+        let exe_suspicious = event.args.first()
+            .map(|a| is_interpreter(a))
+            .unwrap_or(false);
+        let parent_suspicious = event.ppid_exe.as_deref()
+            .map(|p| is_interpreter(p))
+            .unwrap_or(false);
+        if exe_suspicious || parent_suspicious {
+            return Some((BehaviorCategory::DataExfiltration, Severity::Critical));
         }
     }
 
@@ -3361,6 +3451,293 @@ mod tests {
         let event = make_exec_event(&["kubectl", "delete", "pod", "my-pod"]);
         let result = classify_behavior(&event);
         assert!(result.is_some());
+    }
+
+    // --- P0: Interpreter credential access fallback ---
+
+    #[test]
+    fn test_python_inline_shadow_read_critical() {
+        let event = make_exec_event(&["python3", "-c", "open('/etc/shadow').read()"]);
+        let result = classify_behavior(&event);
+        assert_eq!(result, Some((BehaviorCategory::DataExfiltration, Severity::Critical)));
+    }
+
+    #[test]
+    fn test_node_inline_shadow_read_critical() {
+        let event = make_exec_event(&["node", "-e", "require('fs').readFileSync('/etc/shadow')"]);
+        let result = classify_behavior(&event);
+        assert_eq!(result, Some((BehaviorCategory::DataExfiltration, Severity::Critical)));
+    }
+
+    #[test]
+    fn test_ruby_inline_shadow_read_critical() {
+        let event = make_exec_event(&["ruby", "-e", "File.read('/etc/shadow')"]);
+        let result = classify_behavior(&event);
+        assert_eq!(result, Some((BehaviorCategory::DataExfiltration, Severity::Critical)));
+    }
+
+    #[test]
+    fn test_python_inline_ssh_key_read_critical() {
+        let event = make_exec_event(&["python3", "-c", "open('.ssh/id_ed25519').read()"]);
+        let result = classify_behavior(&event);
+        assert_eq!(result, Some((BehaviorCategory::DataExfiltration, Severity::Critical)));
+    }
+
+    #[test]
+    fn test_python_inline_aws_cred_read_detected() {
+        // AWS credential patterns are caught earlier in the pipeline as Warning
+        // (generic AWS credential theft detection). Still detected — not a gap.
+        let event = make_exec_event(&["python3", "-c", "open('.aws/credentials').read()"]);
+        let result = classify_behavior(&event);
+        assert_eq!(result, Some((BehaviorCategory::DataExfiltration, Severity::Warning)));
+    }
+
+    #[test]
+    fn test_python_inline_gateway_yaml_read_critical() {
+        let event = make_exec_event(&["python3", "-c", "open('gateway.yaml').read()"]);
+        let result = classify_behavior(&event);
+        assert_eq!(result, Some((BehaviorCategory::DataExfiltration, Severity::Critical)));
+    }
+
+    // --- P0: sendfile/copy_file_range from interpreters ---
+
+    #[test]
+    fn test_sendfile_from_python_critical() {
+        let event = ParsedEvent {
+            syscall_name: "sendfile".to_string(),
+            command: None,
+            args: vec!["/usr/bin/python3".to_string()],
+            file_path: None,
+            success: true,
+            raw: String::new(),
+            actor: Actor::Unknown,
+            ppid_exe: None,
+        };
+        let result = classify_behavior(&event);
+        assert_eq!(result, Some((BehaviorCategory::DataExfiltration, Severity::Critical)));
+    }
+
+    #[test]
+    fn test_sendfile_from_node_critical() {
+        let event = ParsedEvent {
+            syscall_name: "sendfile".to_string(),
+            command: None,
+            args: vec!["/usr/bin/node".to_string()],
+            file_path: None,
+            success: true,
+            raw: String::new(),
+            actor: Actor::Unknown,
+            ppid_exe: None,
+        };
+        let result = classify_behavior(&event);
+        assert_eq!(result, Some((BehaviorCategory::DataExfiltration, Severity::Critical)));
+    }
+
+    #[test]
+    fn test_copy_file_range_from_ruby_critical() {
+        let event = ParsedEvent {
+            syscall_name: "copy_file_range".to_string(),
+            command: None,
+            args: vec!["/usr/bin/ruby".to_string()],
+            file_path: None,
+            success: true,
+            raw: String::new(),
+            actor: Actor::Unknown,
+            ppid_exe: None,
+        };
+        let result = classify_behavior(&event);
+        assert_eq!(result, Some((BehaviorCategory::DataExfiltration, Severity::Critical)));
+    }
+
+    #[test]
+    fn test_sendfile_with_interpreter_parent_critical() {
+        let event = ParsedEvent {
+            syscall_name: "sendfile".to_string(),
+            command: None,
+            args: vec![],
+            file_path: None,
+            success: true,
+            raw: String::new(),
+            actor: Actor::Unknown,
+            ppid_exe: Some("/usr/bin/python3".to_string()),
+        };
+        let result = classify_behavior(&event);
+        assert_eq!(result, Some((BehaviorCategory::DataExfiltration, Severity::Critical)));
+    }
+
+    // --- Flag 11: CUSTOM TOOLING tests ---
+
+    #[test]
+    fn test_insmod_kernel_module_critical() {
+        let event = make_exec_event(&["insmod", "/tmp/nonexistent.ko"]);
+        let result = classify_behavior(&event);
+        assert_eq!(result, Some((BehaviorCategory::PrivilegeEscalation, Severity::Critical)));
+    }
+
+    #[test]
+    fn test_modprobe_kernel_module_critical() {
+        let event = make_exec_event(&["modprobe", "evil_module"]);
+        let result = classify_behavior(&event);
+        assert_eq!(result, Some((BehaviorCategory::PrivilegeEscalation, Severity::Critical)));
+    }
+
+    #[test]
+    fn test_python_prctl_comm_rename_detected() {
+        let event = make_exec_event(&["python3", "-c", "libc.prctl(15, b'systemd-helper', 0, 0, 0)"]);
+        let result = classify_behavior(&event);
+        assert_eq!(result, Some((BehaviorCategory::SecurityTamper, Severity::Warning)));
+    }
+
+    #[test]
+    fn test_python_memfd_create_detected() {
+        let event = make_exec_event(&["python3", "-c", "libc.memfd_create(b'test', MFD_CLOEXEC)"]);
+        let result = classify_behavior(&event);
+        assert_eq!(result, Some((BehaviorCategory::SecurityTamper, Severity::Critical)));
+    }
+
+    #[test]
+    fn test_memfd_create_syscall_critical() {
+        let event = ParsedEvent {
+            syscall_name: "memfd_create".to_string(),
+            command: None,
+            args: vec![],
+            file_path: None,
+            success: true,
+            raw: String::new(),
+            actor: Actor::Unknown,
+            ppid_exe: None,
+        };
+        let result = classify_behavior(&event);
+        assert_eq!(result, Some((BehaviorCategory::SecurityTamper, Severity::Critical)));
+    }
+
+    #[test]
+    fn test_python_raw_socket_exfil_detected() {
+        let event = make_exec_event(&["python3", "-c", "s = socket.socket(); s.connect(('127.0.0.1', 19999))"]);
+        let result = classify_behavior(&event);
+        assert!(result.is_some(), "Python raw socket.connect should be detected");
+    }
+
+    #[test]
+    fn test_python_ctypes_sendto_detected() {
+        let event = make_exec_event(&["python3", "-c", "libc.sendto(fd, b'EXFIL-UDP', 16, 0, addr, 16)"]);
+        let result = classify_behavior(&event);
+        // Caught by -c flag on interpreter → at minimum Warning
+        assert!(result.is_some(), "Python ctypes sendto should be detected");
+    }
+
+    #[test]
+    fn test_flag11_fork_cat_shadow_detected() {
+        // Fork + comm rename attack ultimately runs cat /etc/shadow
+        let event = make_exec_event(&["cat", "/etc/shadow"]);
+        let result = classify_behavior(&event);
+        assert_eq!(result, Some((BehaviorCategory::PrivilegeEscalation, Severity::Critical)));
+    }
+
+    #[test]
+    fn test_sendfile_from_non_interpreter_not_flagged() {
+        let event = ParsedEvent {
+            syscall_name: "sendfile".to_string(),
+            command: None,
+            args: vec!["/usr/bin/nginx".to_string()],
+            file_path: None,
+            success: true,
+            raw: String::new(),
+            actor: Actor::Unknown,
+            ppid_exe: None,
+        };
+        let result = classify_behavior(&event);
+        // nginx using sendfile is normal — should not flag
+        assert!(result.is_none());
+    }
+
+    // --- P3: UDP exfil via sendto from interpreters ---
+
+    #[test]
+    fn test_sendto_from_python_critical() {
+        let event = ParsedEvent {
+            syscall_name: "sendto".to_string(),
+            command: None,
+            args: vec!["/usr/bin/python3".to_string()],
+            file_path: None,
+            success: true,
+            raw: String::new(),
+            actor: Actor::Unknown,
+            ppid_exe: None,
+        };
+        let result = classify_behavior(&event);
+        assert_eq!(result, Some((BehaviorCategory::DataExfiltration, Severity::Critical)));
+    }
+
+    #[test]
+    fn test_sendto_from_non_interpreter_not_flagged() {
+        let event = ParsedEvent {
+            syscall_name: "sendto".to_string(),
+            command: None,
+            args: vec!["/usr/bin/systemd-resolved".to_string()],
+            file_path: None,
+            success: true,
+            raw: String::new(),
+            actor: Actor::Unknown,
+            ppid_exe: None,
+        };
+        let result = classify_behavior(&event);
+        assert!(result.is_none());
+    }
+
+    // --- P2: sudo + interpreter chain detection ---
+
+    #[test]
+    fn test_sudo_python_setuid_critical() {
+        let event = make_exec_event(&["sudo", "python3", "-c", "import os; os.setuid(0); os.system('bash')"]);
+        let result = classify_behavior(&event);
+        assert_eq!(result, Some((BehaviorCategory::PrivilegeEscalation, Severity::Critical)));
+    }
+
+    #[test]
+    fn test_sudo_node_create_server_critical() {
+        let event = make_exec_event(&["sudo", "node", "-e", "require('http').createServer((q,s)=>{s.end('ok')}).listen(80)"]);
+        let result = classify_behavior(&event);
+        assert_eq!(result, Some((BehaviorCategory::PrivilegeEscalation, Severity::Critical)));
+    }
+
+    #[test]
+    fn test_sudo_python_http_server_critical() {
+        let event = make_exec_event(&["sudo", "python3", "-m", "http.server", "80"]);
+        let result = classify_behavior(&event);
+        assert_eq!(result, Some((BehaviorCategory::PrivilegeEscalation, Severity::Critical)));
+    }
+
+    #[test]
+    fn test_sudo_ruby_seteuid_critical() {
+        let event = make_exec_event(&["sudo", "ruby", "-e", "Process.euid = 0"]);
+        let result = classify_behavior(&event);
+        assert_eq!(result, Some((BehaviorCategory::PrivilegeEscalation, Severity::Critical)));
+    }
+
+    #[test]
+    fn test_sudo_perl_bind_critical() {
+        let event = make_exec_event(&["sudo", "perl", "-e", "socket(S,2,1,0); bind(S, sockaddr_in(80, INADDR_ANY))"]);
+        let result = classify_behavior(&event);
+        assert_eq!(result, Some((BehaviorCategory::PrivilegeEscalation, Severity::Critical)));
+    }
+
+    #[test]
+    fn test_sudo_interpreter_generic_warning() {
+        // sudo + interpreter without specific escalation pattern = Warning
+        let event = make_exec_event(&["sudo", "python3", "script.py"]);
+        let result = classify_behavior(&event);
+        assert_eq!(result, Some((BehaviorCategory::PrivilegeEscalation, Severity::Warning)));
+    }
+
+    #[test]
+    fn test_sudo_non_interpreter_not_caught_here() {
+        // sudo + non-interpreter should NOT be caught by this rule
+        // (may be caught by other rules like SecureClaw)
+        let event = make_exec_event(&["sudo", "apt-get", "install", "vim"]);
+        let result = classify_behavior(&event);
+        // apt-get is not an interpreter, so this specific rule doesn't fire
+        assert_ne!(result, Some((BehaviorCategory::PrivilegeEscalation, Severity::Warning)));
     }
 }
 

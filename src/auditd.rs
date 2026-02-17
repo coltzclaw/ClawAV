@@ -44,6 +44,8 @@ pub const RECOMMENDED_AUDIT_RULES: &[&str] = &[
     // sendfile/copy_file_range monitoring — catches shutil.copyfile() and similar bypasses
     "-a always,exit -F arch=b64 -S sendfile -F uid=1000 -F success=1 -k clawtower_cred_read",
     "-a always,exit -F arch=b64 -S copy_file_range -F uid=1000 -F success=1 -k clawtower_cred_read",
+    // sendto/sendmsg monitoring — catches UDP exfil (DNS TXT, ctypes sendto) that bypasses connect()
+    "-a always,exit -F arch=b64 -S sendto -F uid=1000 -F success=1 -k clawtower_net_connect",
     // Crypto wallet file access monitoring (Tinman FT-* — financial transaction detection)
     "-w /home/openclaw/.ethereum/ -p r -k clawtower_crypto_access",
     "-w /home/openclaw/.config/solana/ -p r -k clawtower_crypto_access",
@@ -143,6 +145,7 @@ fn syscall_name_aarch64(num: u32) -> &'static str {
         260 => "wait4",
         261 => "prlimit64",
         271 => "sendfile",
+        279 => "memfd_create",
         281 => "execveat",
         285 => "copy_file_range",
         291 => "statx",
@@ -489,7 +492,7 @@ pub async fn tail_audit_log(
         line.clear();
         match reader.read_line(&mut line) {
             Ok(0) => {
-                sleep(Duration::from_millis(500)).await;
+                sleep(Duration::from_millis(200)).await;
             }
             Ok(_) => {
                 if let Some(alert) = parse_audit_line(&line, watched_users.as_deref()) {
@@ -565,12 +568,12 @@ pub async fn tail_audit_log_full(
 
     // Periodic auditd rule reload to fix inode staleness.
     // File watches (-w) use inodes; when files are replaced/rewritten,
-    // the inode changes and the watch goes stale. Reloading every 5 min
+    // the inode changes and the watch goes stale. Reloading every 60s
     // refreshes all watches to current inodes.
     // Start with epoch-like instant so first iteration triggers an immediate reload,
     // ensuring fresh inodes right after deploy/restart.
-    let mut last_rule_reload = std::time::Instant::now() - Duration::from_secs(600);
-    const RULE_RELOAD_INTERVAL: Duration = Duration::from_secs(300); // 5 minutes
+    let mut last_rule_reload = std::time::Instant::now() - Duration::from_secs(120);
+    const RULE_RELOAD_INTERVAL: Duration = Duration::from_secs(60); // 60 seconds (was 5min, reduced for inode staleness)
     loop {
         // Check if auditd rules need reloading (fixes inode staleness)
         if last_rule_reload.elapsed() >= RULE_RELOAD_INTERVAL {
@@ -595,7 +598,9 @@ pub async fn tail_audit_log_full(
         line.clear();
         match reader.read_line(&mut line) {
             Ok(0) => {
-                sleep(Duration::from_millis(500)).await;
+                // 200ms poll — keeps latency under 1s for Red Lobster's 3s check window.
+                // Previous 500ms caused edge-case timing failures (Flag 9 env-var test).
+                sleep(Duration::from_millis(200)).await;
             }
             Ok(_) => {
                 if let Some(event) = parse_to_event(&line, watched_users.as_deref()) {
@@ -1355,6 +1360,11 @@ mod tests {
     #[test]
     fn test_copy_file_range_syscall_name() {
         assert_eq!(syscall_name_aarch64(285), "copy_file_range");
+    }
+
+    #[test]
+    fn test_memfd_create_syscall_name() {
+        assert_eq!(syscall_name_aarch64(279), "memfd_create");
     }
 
     #[test]
