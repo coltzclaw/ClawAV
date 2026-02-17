@@ -52,18 +52,10 @@ pub struct Config {
 }
 
 /// Behavior detection engine configuration.
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Default, Deserialize, Serialize, Clone)]
 pub struct BehaviorConfig {
     #[serde(default)]
     pub safe_hosts: Vec<String>,
-}
-
-impl Default for BehaviorConfig {
-    fn default() -> Self {
-        Self {
-            safe_hosts: Vec::new(),
-        }
-    }
 }
 
 /// Auto-update configuration: checks GitHub releases periodically.

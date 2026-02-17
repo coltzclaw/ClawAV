@@ -217,7 +217,7 @@ impl PolicyEngine {
             }
             if self.matches_rule(rule, event) {
                 let severity = action_to_severity(&rule.action);
-                let dominated = best.as_ref().map_or(true, |b| severity_rank(&severity) > severity_rank(&b.severity));
+                let dominated = best.as_ref().is_none_or(|b| severity_rank(&severity) > severity_rank(&b.severity));
                 if dominated {
                     best = Some(PolicyVerdict {
                         rule_name: rule.name.clone(),
@@ -297,12 +297,11 @@ impl PolicyEngine {
             // Also check args for file paths
             if event.command.is_some() {
                 for arg in &event.args {
-                    if arg.starts_with('/') {
-                        if spec.file_access.iter().any(|pattern| {
+                    if arg.starts_with('/')
+                        && spec.file_access.iter().any(|pattern| {
                             glob_match::glob_match(pattern, arg)
                         }) {
                             return true;
-                        }
                     }
                 }
             }

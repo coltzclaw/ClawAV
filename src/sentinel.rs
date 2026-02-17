@@ -180,22 +180,19 @@ impl Sentinel {
             .unwrap_or_default();
 
         // systemd user units
-        if path.contains("/.config/systemd/user/") {
-            if fname.ends_with(".service") || fname.ends_with(".timer") {
+        if path.contains("/.config/systemd/user/")
+            && (fname.ends_with(".service") || fname.ends_with(".timer")) {
                 return true;
-            }
         }
         // XDG autostart
-        if path.contains("/.config/autostart/") {
-            if fname.ends_with(".desktop") {
+        if path.contains("/.config/autostart/")
+            && fname.ends_with(".desktop") {
                 return true;
-            }
         }
         // Git hooks (non-.sample files)
-        if path.contains(".git/hooks/") {
-            if !fname.ends_with(".sample") {
+        if path.contains(".git/hooks/")
+            && !fname.ends_with(".sample") {
                 return true;
-            }
         }
         // npm lifecycle hooks (package.json with postinstall/preinstall scripts)
         if fname == "package.json" {
@@ -529,10 +526,8 @@ impl Sentinel {
                 }
             } else {
                 let dir = p.parent().unwrap_or(p);
-                if watched_dirs.insert(dir.to_path_buf()) {
-                    if dir.exists() {
-                        watcher.watch(dir, RecursiveMode::NonRecursive)?;
-                    }
+                if watched_dirs.insert(dir.to_path_buf()) && dir.exists() {
+                    watcher.watch(dir, RecursiveMode::NonRecursive)?;
                 }
             }
         }
@@ -608,12 +603,7 @@ const INJECTION_MARKERS: &[&str] = &[
 /// Check if content contains prompt injection markers.
 pub fn check_injection_markers(content: &str) -> Option<&'static str> {
     let content_lower = content.to_lowercase();
-    for marker in INJECTION_MARKERS {
-        if content_lower.contains(&marker.to_lowercase()) {
-            return Some(marker);
-        }
-    }
-    None
+    INJECTION_MARKERS.iter().find(|marker| content_lower.contains(&marker.to_lowercase())).copied()
 }
 
 #[cfg(test)]

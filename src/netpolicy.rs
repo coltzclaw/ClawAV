@@ -122,7 +122,7 @@ fn extract_host_from_url(s: &str) -> Option<String> {
     if let Some(rest) = s.strip_prefix("http://").or_else(|| s.strip_prefix("https://")) {
         let host_port = rest.split('/').next()?;
         let host = host_port.split(':').next()?;
-        let host = host.split('@').last()?; // handle user@host
+        let host = host.split('@').next_back()?; // handle user@host
         if host.contains('.') || host == "localhost" {
             return Some(host.to_lowercase());
         }

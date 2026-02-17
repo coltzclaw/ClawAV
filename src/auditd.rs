@@ -164,7 +164,7 @@ pub fn extract_field<'a>(line: &'a str, field: &str) -> Option<&'a str> {
 /// Decode hex-encoded argument strings from EXECVE records
 fn decode_hex_arg(s: &str) -> String {
     // auditd sometimes hex-encodes args: a0=2F7573722F62696E2F6375726C
-    if s.len() > 2 && s.chars().all(|c| c.is_ascii_hexdigit()) && s.len() % 2 == 0 {
+    if s.len() > 2 && s.chars().all(|c| c.is_ascii_hexdigit()) && s.len().is_multiple_of(2) {
         let bytes: Vec<u8> = (0..s.len())
             .step_by(2)
             .filter_map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok())
@@ -273,7 +273,7 @@ pub fn parse_to_event(line: &str, watched_users: Option<&[String]>) -> Option<Pa
         // Try to extract file path from name= field or exe= field
         let file_path = extract_field(line, "name")
             .or_else(|| extract_field(line, "exe"))
-            .map(|s| decode_hex_arg(s));
+            .map(decode_hex_arg);
 
         // Attribution: auid=4294967295 (unset) means agent/service, otherwise human
         let auid = extract_field(line, "auid").and_then(|s| s.parse::<u32>().ok());
@@ -356,7 +356,7 @@ pub fn check_tamper_event(event: &ParsedEvent) -> Option<Alert> {
         const NET_SUSPICIOUS_EXES: &[&str] = &[
             "python3", "python", "node", "nodejs", "perl", "ruby", "php", "lua",
         ];
-        if NET_SUSPICIOUS_EXES.iter().any(|&s| exe_base == s) {
+        if NET_SUSPICIOUS_EXES.contains(&exe_base) {
             return Some(Alert::new(
                 Severity::Warning,
                 "auditd:net_connect",
@@ -413,7 +413,7 @@ pub fn check_tamper_event(event: &ParsedEvent) -> Option<Alert> {
             const RUNTIME_INTERPRETERS: &[&str] = &[
                 "python3", "python", "node", "nodejs", "perl", "ruby", "php", "lua",
             ];
-            let is_runtime = RUNTIME_INTERPRETERS.iter().any(|&r| exe_base == r);
+            let is_runtime = RUNTIME_INTERPRETERS.contains(&exe_base);
             let severity = if is_runtime { Severity::Critical } else { Severity::Warning };
             let msg = if is_runtime {
                 format!("🚨 Runtime connect(): {} — possible scripted exfiltration via raw socket", exe)

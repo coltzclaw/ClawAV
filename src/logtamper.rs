@@ -23,11 +23,8 @@ pub async fn monitor_log_integrity(
     let mut last_inode: Option<u64> = None;
 
     loop {
-        match check_log_file(&log_path, &mut last_size, &mut last_inode) {
-            Some(alert) => {
-                let _ = tx.send(alert).await;
-            }
-            None => {}
+        if let Some(alert) = check_log_file(&log_path, &mut last_size, &mut last_inode) {
+            let _ = tx.send(alert).await;
         }
         sleep(Duration::from_secs(interval_secs)).await;
     }

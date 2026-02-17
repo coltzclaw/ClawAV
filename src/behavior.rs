@@ -602,16 +602,15 @@ pub fn classify_behavior(event: &ParsedEvent) -> Option<(BehaviorCategory, Sever
         }
 
         // --- CRITICAL: exec -a process name masking (stealth technique) ---
-        if binary == "bash" || binary == "sh" || binary == "zsh" {
-            if cmd.contains("exec -a") || cmd.contains("exec  -a") {
+        if (binary == "bash" || binary == "sh" || binary == "zsh")
+            && (cmd.contains("exec -a") || cmd.contains("exec  -a")) {
                 return Some((BehaviorCategory::SecurityTamper, Severity::Warning));
-            }
         }
 
         // --- CRITICAL: Wrapper binaries executing sensitive commands ---
         // `script -c "cmd"` or `script -qc "cmd"` wraps command execution
-        if binary == "script" {
-            if args.iter().any(|a| a == "-c" || a.starts_with("-c") || a.contains("c")) {
+        if binary == "script"
+            && args.iter().any(|a| a == "-c" || a.starts_with("-c") || a.contains("c")) {
                 // Check if any arg references a sensitive path
                 let has_sensitive = args.iter().skip(1).any(|a| {
                     CRITICAL_READ_PATHS.iter().any(|p| a.contains(p)) ||
@@ -621,7 +620,6 @@ pub fn classify_behavior(event: &ParsedEvent) -> Option<(BehaviorCategory, Sever
                     return Some((BehaviorCategory::DataExfiltration, Severity::Critical));
                 }
                 return Some((BehaviorCategory::SecurityTamper, Severity::Warning));
-            }
         }
 
         // --- CRITICAL: xargs executing sensitive-file readers ---
@@ -1036,8 +1034,7 @@ pub fn classify_behavior(event: &ParsedEvent) -> Option<(BehaviorCategory, Sever
         // dd special handling — uses if=<path> syntax
         if binary == "dd" {
             for arg in args.iter() {
-                if arg.starts_with("if=") {
-                    let path = &arg[3..];
+                if let Some(path) = arg.strip_prefix("if=") {
                     for crit_path in CRITICAL_READ_PATHS {
                         if path.contains(crit_path) {
                             return Some((BehaviorCategory::PrivilegeEscalation, Severity::Critical));
@@ -1126,7 +1123,7 @@ pub fn classify_behavior(event: &ParsedEvent) -> Option<(BehaviorCategory, Sever
                     return Some((BehaviorCategory::Reconnaissance, Severity::Warning));
                 }
             }
-            for persist_path in &PERSISTENCE_WRITE_PATHS[..] {
+            for persist_path in PERSISTENCE_WRITE_PATHS {
                 if path.contains(persist_path) {
                     return Some((BehaviorCategory::SecurityTamper, Severity::Warning));
                 }
@@ -1141,7 +1138,7 @@ pub fn classify_behavior(event: &ParsedEvent) -> Option<(BehaviorCategory, Sever
                 }
             }
             // Persistence via writing to cron/systemd/init paths
-            for persist_path in &PERSISTENCE_WRITE_PATHS[..] {
+            for persist_path in PERSISTENCE_WRITE_PATHS {
                 if path.contains(persist_path) {
                     return Some((BehaviorCategory::SecurityTamper, Severity::Critical));
                 }

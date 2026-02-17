@@ -118,7 +118,7 @@ fn find_scripts_dir() -> Option<PathBuf> {
         let parent = exe.parent()?;
         let candidate = parent.join("../../scripts");
         if candidate.join("configure.sh").exists() {
-            return Some(candidate.canonicalize().ok()?);
+            return candidate.canonicalize().ok();
         }
     }
     // Check common locations
@@ -297,7 +297,7 @@ async fn async_main() -> Result<()> {
             let _ = std::process::Command::new("systemctl")
                 .args(["status", "clawtower", "--no-pager"])
                 .status();
-            eprintln!("");
+            eprintln!();
             // Show recent alerts from API if available
             let api_result = std::process::Command::new("curl")
                 .args(["-s", "http://localhost:18791/api/security"])
@@ -326,11 +326,11 @@ async fn async_main() -> Result<()> {
             }
             let pass_count = results.iter().filter(|r| r.status == scanner::ScanStatus::Pass).count();
             let total = results.len();
-            eprintln!("");
+            eprintln!();
             eprintln!("Score: {}/{} checks passed", pass_count, total);
             return Ok(());
         }
-        "run" | "tui" | _ => {
+        _ => {
             // Fall through to normal watchdog startup
         }
     }
@@ -481,10 +481,8 @@ async fn async_main() -> Result<()> {
                 if let Err(e) = journald::tail_journald_network(&prefix, tx).await {
                     eprintln!("journald network monitor error: {}", e);
                 }
-            } else {
-                if let Err(e) = network::tail_network_log(&path, &prefix, tx).await {
-                    eprintln!("file network monitor error: {}", e);
-                }
+            } else if let Err(e) = network::tail_network_log(&path, &prefix, tx).await {
+                eprintln!("file network monitor error: {}", e);
             }
         });
     }

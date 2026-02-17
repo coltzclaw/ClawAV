@@ -172,19 +172,16 @@ pub fn scan_crontab_audit() -> ScanResult {
     let mut issues = Vec::new();
 
     // Check user crontabs
-    match run_cmd("bash", &["-c", "for u in $(cut -d: -f1 /etc/passwd); do crontab -l -u $u 2>/dev/null | grep -v '^#' | grep -v '^$' && echo \"User: $u\"; done"]) {
-        Ok(output) => {
-            if !output.trim().is_empty() {
-                let lines: Vec<&str> = output.lines().collect();
-                for line in lines {
-                    if line.contains("wget") || line.contains("curl") || line.contains("nc") || 
-                       line.contains("/dev/tcp") || line.contains("python -c") || line.contains("base64") {
-                        issues.push(format!("Suspicious cron job: {}", line.trim()));
-                    }
+    if let Ok(output) = run_cmd("bash", &["-c", "for u in $(cut -d: -f1 /etc/passwd); do crontab -l -u $u 2>/dev/null | grep -v '^#' | grep -v '^$' && echo \"User: $u\"; done"]) {
+        if !output.trim().is_empty() {
+            let lines: Vec<&str> = output.lines().collect();
+            for line in lines {
+                if line.contains("wget") || line.contains("curl") || line.contains("nc") || 
+                   line.contains("/dev/tcp") || line.contains("python -c") || line.contains("base64") {
+                    issues.push(format!("Suspicious cron job: {}", line.trim()));
                 }
             }
         }
-        Err(_) => {} // Normal if no user crontabs
     }
 
     // Check system crontabs
@@ -221,15 +218,12 @@ pub fn scan_world_writable_files() -> ScanResult {
     let mut issues = Vec::new();
 
     for dir in &sensitive_dirs {
-        match run_cmd("sh", &["-c", &format!("find {} -type f -perm 0002 2>/dev/null", dir)]) {
-            Ok(output) => {
-                for file in output.lines() {
-                    if !file.trim().is_empty() {
-                        issues.push(file.trim().to_string());
-                    }
+        if let Ok(output) = run_cmd("sh", &["-c", &format!("find {} -type f -perm 0002 2>/dev/null", dir)]) {
+            for file in output.lines() {
+                if !file.trim().is_empty() {
+                    issues.push(file.trim().to_string());
                 }
             }
-            Err(_) => {} // Directory might not exist or permission denied
         }
     }
 
@@ -344,13 +338,10 @@ pub fn scan_docker_security() -> ScanResult {
 
             // Check if Docker socket is exposed
             if std::path::Path::new("/var/run/docker.sock").exists() {
-                match run_cmd("ls", &["-la", "/var/run/docker.sock"]) {
-                    Ok(output) => {
-                        if output.contains("rw-rw-rw-") || output.contains("666") {
-                            issues.push("Docker socket is world-writable".to_string());
-                        }
+                if let Ok(output) = run_cmd("ls", &["-la", "/var/run/docker.sock"]) {
+                    if output.contains("rw-rw-rw-") || output.contains("666") {
+                        issues.push("Docker socket is world-writable".to_string());
                     }
-                    Err(_) => {}
                 }
             }
 
@@ -675,10 +666,8 @@ pub fn scan_swap_tmpfs_security() -> ScanResult {
     // Check /dev/shm security
     if let Ok(output) = run_cmd("mount", &[]) {
         for line in output.lines() {
-            if line.contains(" /dev/shm ") {
-                if !line.contains("noexec") {
-                    issues.push("/dev/shm allows execution".to_string());
-                }
+            if line.contains(" /dev/shm ") && !line.contains("noexec") {
+                issues.push("/dev/shm allows execution".to_string());
             }
         }
     }
@@ -813,7 +802,7 @@ pub fn scan_ld_preload_persistence() -> ScanResult {
                 let fields: Vec<&str> = line.split(':').collect();
                 if fields.len() >= 6 {
                     let uid: u32 = fields[2].parse().unwrap_or(0);
-                    if uid >= 1000 && uid < 65534 {
+                    if (1000..65534).contains(&uid) {
                         return Some(fields[5].to_string());
                     }
                 }
@@ -920,20 +909,18 @@ pub fn scan_core_dump_settings() -> ScanResult {
 
     // Check ulimit core dump settings
     if let Ok(output) = run_cmd("ulimit", &["-c"]) {
-        if output.trim() != "0" && output.trim() != "unlimited" {
-            if output.trim().parse::<u64>().unwrap_or(0) > 0 {
+        if output.trim() != "0" && output.trim() != "unlimited"
+            && output.trim().parse::<u64>().unwrap_or(0) > 0 {
                 issues.push(format!("Core dumps allowed: ulimit -c = {}", output.trim()));
-            }
         }
     }
 
     // Check /proc/sys/kernel/core_pattern
     if let Ok(pattern) = std::fs::read_to_string("/proc/sys/kernel/core_pattern") {
         let pattern = pattern.trim();
-        if !pattern.starts_with("|/bin/false") && pattern != "core" {
-            if pattern.contains("/") && !pattern.contains("/dev/null") {
+        if !pattern.starts_with("|/bin/false") && pattern != "core"
+            && pattern.contains("/") && !pattern.contains("/dev/null") {
                 issues.push(format!("Core dumps directed to: {}", pattern));
-            }
         }
     }
 
@@ -998,10 +985,9 @@ pub fn scan_network_interfaces() -> ScanResult {
     if let Ok(output) = run_cmd("ip", &["route", "show"]) {
         for line in output.lines() {
             // Check for routes to private networks that might indicate tunneling
-            if line.contains("10.0.0.0/8") || line.contains("172.16.0.0/12") || line.contains("192.168.0.0/16") {
-                if line.contains("tun") || line.contains("tap") {
+            if (line.contains("10.0.0.0/8") || line.contains("172.16.0.0/12") || line.contains("192.168.0.0/16"))
+                && (line.contains("tun") || line.contains("tap")) {
                     issues.push(format!("VPN/tunnel route detected: {}", line.trim()));
-                }
             }
         }
     }
@@ -1144,7 +1130,7 @@ pub fn scan_user_account_audit() -> ScanResult {
                 let group_name = fields[0];
                 if DANGEROUS_GROUPS.contains(&group_name) {
                     let members: Vec<&str> = fields[3].split(',').filter(|s| !s.is_empty()).collect();
-                    if members.iter().any(|&m| m == "openclaw") {
+                    if members.contains(&"openclaw") {
                         issues.push(format!("openclaw in dangerous group '{}' (privilege escalation vector)", group_name));
                     }
                 }
@@ -2134,7 +2120,7 @@ fn check_mdns_openclaw_leak(avahi_output: &str) -> ScanResult {
 
 /// Scan for mDNS info leaks by checking avahi-browse.
 fn scan_mdns_leaks() -> Vec<ScanResult> {
-    match Command::new("avahi-browse").args(&["-apt", "--no-db-lookup"]).output() {
+    match Command::new("avahi-browse").args(["-apt", "--no-db-lookup"]).output() {
         Ok(output) => vec![check_mdns_openclaw_leak(
             &String::from_utf8_lossy(&output.stdout))],
         Err(_) => vec![ScanResult::new("openclaw:mdns", ScanStatus::Pass,

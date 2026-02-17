@@ -27,7 +27,7 @@ use std::collections::HashMap;
 use std::io;
 use tokio::sync::mpsc;
 use std::time::Duration;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::alerts::{Alert, AlertStore, Severity};
 use crate::config::Config;
@@ -196,10 +196,10 @@ impl App {
     }
 
     /// Load configuration from a file and populate the editor fields.
-    pub fn load_config(&mut self, path: &PathBuf) -> Result<()> {
+    pub fn load_config(&mut self, path: &Path) -> Result<()> {
         let config = Config::load(path)?;
         self.config = Some(config);
-        self.config_path = Some(path.clone());
+        self.config_path = Some(path.to_path_buf());
         self.refresh_fields();
         Ok(())
     }
@@ -331,11 +331,11 @@ impl App {
                     self.selected_tab = self.tab_titles.len() - 1;
                 }
             }
-            KeyCode::Right if !self.config_editing && !(self.selected_tab == 5 && self.config_focus == ConfigFocus::Fields) => {
+            KeyCode::Right if !self.config_editing && (self.selected_tab != 5 || self.config_focus != ConfigFocus::Fields) => {
                 self.selected_tab = (self.selected_tab + 1) % self.tab_titles.len();
                 if self.selected_tab == 5 { self.config_focus = ConfigFocus::Sidebar; }
             }
-            KeyCode::Left if !self.config_editing && !(self.selected_tab == 5 && self.config_focus == ConfigFocus::Fields) => {
+            KeyCode::Left if !self.config_editing && (self.selected_tab != 5 || self.config_focus != ConfigFocus::Fields) => {
                 if self.selected_tab > 0 {
                     self.selected_tab -= 1;
                 } else {
@@ -595,8 +595,7 @@ impl App {
     }
 
     fn run_sudo_action(&mut self, action: &str, password: &str) {
-        let shell_cmd: String = if action.starts_with("save_config:") {
-            let path = &action["save_config:".len()..];
+        let shell_cmd: String = if let Some(path) = action.strip_prefix("save_config:") {
             format!(
                 "chattr -i '{}' 2>/dev/null; cp /tmp/clawtower-config-save.toml '{}' && chattr +i '{}' && rm -f /tmp/clawtower-config-save.toml && echo 'CONFIG_SAVED'",
                 path, path, path
@@ -985,9 +984,8 @@ fn apply_field_to_config(config: &mut Config, section: &str, field_name: &str, v
             "port" => if let Ok(port) = value.parse::<u16>() { config.api.port = port; },
             _ => {}
         },
-        "scans" => match field_name {
-            "interval" => if let Ok(interval) = value.parse::<u64>() { config.scans.interval = interval; },
-            _ => {}
+        "scans" => if field_name == "interval" {
+            if let Ok(interval) = value.parse::<u64>() { config.scans.interval = interval; }
         },
         "proxy" => match field_name {
             "enabled" => config.proxy.enabled = value == "true",
@@ -1371,7 +1369,7 @@ fn ui(f: &mut Frame, app: &mut App) {
 
     // Content area — detail view overrides tab content
     if let Some(ref alert) = app.detail_alert.clone() {
-        render_detail_view(f, chunks[1], &alert);
+        render_detail_view(f, chunks[1], alert);
     } else {
         match app.selected_tab {
             0 => render_alert_list(f, chunks[1], app, 0, None, "Alert Feed"),

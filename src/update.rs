@@ -355,8 +355,6 @@ pub fn run_update(args: &[String]) -> Result<()> {
         return Ok(());
     }
 
-    let binary_data = binary_data;
-
     // 4. Replace binary (chattr dance)
     let binary_path = current_binary_path()?;
     let tmp_path = binary_path.with_extension("new");
@@ -505,25 +503,22 @@ pub async fn run_auto_updater(alert_tx: mpsc::Sender<Alert>, interval_secs: u64,
             if std::path::Path::new("/usr/local/bin/clawtower-tray").exists() {
                 let tray_asset = format!("clawtower-tray-{}-linux", if cfg!(target_arch = "aarch64") { "aarch64" } else { "x86_64" });
                 let tray_url = format!("https://github.com/{}/releases/download/{}/{}", GITHUB_REPO, tag, tray_asset);
-                match tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
+                if let Ok(Ok(tray_data)) = tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
                     let client = reqwest::blocking::Client::builder().user_agent("clawtower-updater").build()?;
                     Ok(client.get(&tray_url).send()?.error_for_status()?.bytes()?.to_vec())
                 }).await {
-                    Ok(Ok(tray_data)) => {
-                        let tray_path = std::path::PathBuf::from("/usr/local/bin/clawtower-tray");
-                        let tray_tmp = tray_path.with_extension("new");
-                        if fs::write(&tray_tmp, &tray_data).is_ok() {
-                            #[cfg(unix)]
-                            {
-                                use std::os::unix::fs::PermissionsExt;
-                                let _ = fs::set_permissions(&tray_tmp, fs::Permissions::from_mode(0o755));
-                            }
-                            let _ = run_cmd("chattr", &["-i", "/usr/local/bin/clawtower-tray"]);
-                            let _ = fs::rename(&tray_tmp, &tray_path);
-                            let _ = run_cmd("chattr", &["+i", "/usr/local/bin/clawtower-tray"]);
+                    let tray_path = std::path::PathBuf::from("/usr/local/bin/clawtower-tray");
+                    let tray_tmp = tray_path.with_extension("new");
+                    if fs::write(&tray_tmp, &tray_data).is_ok() {
+                        #[cfg(unix)]
+                        {
+                            use std::os::unix::fs::PermissionsExt;
+                            let _ = fs::set_permissions(&tray_tmp, fs::Permissions::from_mode(0o755));
                         }
+                        let _ = run_cmd("chattr", &["-i", "/usr/local/bin/clawtower-tray"]);
+                        let _ = fs::rename(&tray_tmp, &tray_path);
+                        let _ = run_cmd("chattr", &["+i", "/usr/local/bin/clawtower-tray"]);
                     }
-                    _ => {} // Tray update is best-effort
                 }
             }
 
