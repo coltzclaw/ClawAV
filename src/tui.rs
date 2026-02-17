@@ -31,6 +31,7 @@ use std::path::{Path, PathBuf};
 
 use crate::alerts::{Alert, AlertStore, Severity};
 use crate::config::Config;
+use crate::response::{PendingAction, PendingStatus, ResponseRequest, SharedPendingActions};
 
 #[allow(dead_code)]
 pub enum TuiEvent {
@@ -119,6 +120,10 @@ pub struct App {
     pub tool_status_cache: HashMap<String, bool>,
     // Muted sources (alerts from these sources are hidden)
     pub muted_sources: Vec<String>,
+    // Response engine integration
+    pub pending_actions: SharedPendingActions,
+    pub response_tx: Option<mpsc::Sender<ResponseRequest>>,
+    pub approval_popup: Option<ApprovalPopup>,
 }
 
 /// State for the modal sudo password prompt overlay.
@@ -149,9 +154,26 @@ pub enum SudoStatus {
     Failed(String),
 }
 
+/// State for the response engine approval popup.
+pub struct ApprovalPopup {
+    /// The pending action being reviewed.
+    pub action_id: String,
+    pub threat_source: String,
+    pub threat_message: String,
+    pub severity: Severity,
+    pub actions_display: Vec<String>,
+    pub playbook: Option<String>,
+    /// Currently selected: 0 = Approve, 1 = Deny
+    pub selected: usize,
+    /// Optional message/annotation
+    pub message_buffer: String,
+    /// Whether the message field is being edited
+    pub editing_message: bool,
+}
+
 impl App {
     /// Create a new TUI application with default state.
-    pub fn new() -> Self {
+    pub fn new(pending_actions: SharedPendingActions, response_tx: Option<mpsc::Sender<ResponseRequest>>) -> Self {
         Self {
             alert_store: AlertStore::new(500),
             selected_tab: 0,
@@ -192,6 +214,9 @@ impl App {
             paused: false,
             tool_status_cache: HashMap::new(),
             muted_sources: Vec::new(),
+            pending_actions,
+            response_tx,
+            approval_popup: None,
         }
     }
 
@@ -264,6 +289,51 @@ impl App {
                     return;
                 }
             }
+        }
+
+        // Handle approval popup if active
+        if let Some(ref mut popup) = self.approval_popup {
+            if popup.editing_message {
+                match key {
+                    KeyCode::Esc => { popup.editing_message = false; }
+                    KeyCode::Backspace => { popup.message_buffer.pop(); }
+                    KeyCode::Char(c) => { popup.message_buffer.push(c); }
+                    KeyCode::Enter => { popup.editing_message = false; }
+                    _ => {}
+                }
+                return;
+            }
+            match key {
+                KeyCode::Up | KeyCode::Down => {
+                    popup.selected = if popup.selected == 0 { 1 } else { 0 };
+                }
+                KeyCode::Char('m') => {
+                    popup.editing_message = true;
+                }
+                KeyCode::Enter => {
+                    let approved = popup.selected == 0;
+                    let action_id = popup.action_id.clone();
+                    let msg = if popup.message_buffer.is_empty() { None } else { Some(popup.message_buffer.clone()) };
+                    self.approval_popup = None;
+
+                    // Send resolution
+                    if let Some(ref tx) = self.response_tx {
+                        let resolve = ResponseRequest::Resolve {
+                            id: action_id,
+                            approved,
+                            by: "admin".to_string(),
+                            message: msg,
+                            surface: "tui".to_string(),
+                        };
+                        let _ = tx.try_send(resolve);
+                    }
+                }
+                KeyCode::Esc => {
+                    self.approval_popup = None;
+                }
+                _ => {}
+            }
+            return;
         }
 
         // Clear saved message on any keypress
@@ -1422,6 +1492,11 @@ fn ui(f: &mut Frame, app: &mut App) {
     if let Some(ref popup) = app.sudo_popup {
         render_sudo_popup(f, f.area(), popup);
     }
+
+    // Approval popup overlay
+    if let Some(ref popup) = app.approval_popup {
+        render_approval_popup(f, f.area(), popup);
+    }
 }
 
 fn render_sudo_popup(f: &mut Frame, area: Rect, popup: &SudoPopup) {
@@ -1479,17 +1554,113 @@ fn render_sudo_popup(f: &mut Frame, area: Rect, popup: &SudoPopup) {
     f.render_widget(paragraph, popup_area);
 }
 
+fn render_approval_popup(f: &mut Frame, area: Rect, popup: &ApprovalPopup) {
+    let popup_width = 70.min(area.width.saturating_sub(4));
+    let popup_height = (14 + popup.actions_display.len() as u16).min(area.height.saturating_sub(2));
+    let x = (area.width.saturating_sub(popup_width)) / 2;
+    let y = (area.height.saturating_sub(popup_height)) / 2;
+    let popup_area = Rect::new(x, y, popup_width, popup_height);
+
+    let clear = Block::default().style(Style::default().bg(Color::Black));
+    f.render_widget(clear, popup_area);
+
+    let severity_style = match popup.severity {
+        Severity::Critical => Style::default().fg(Color::Red).bold(),
+        Severity::Warning => Style::default().fg(Color::Yellow).bold(),
+        Severity::Info => Style::default().fg(Color::Blue).bold(),
+    };
+
+    let mut lines = vec![
+        Line::from(Span::styled(
+            format!("🚨 {} THREAT DETECTED", popup.severity),
+            severity_style,
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Source: ", Style::default().fg(Color::DarkGray)),
+            Span::raw(&popup.threat_source),
+        ]),
+        Line::from(vec![
+            Span::styled("Threat: ", Style::default().fg(Color::DarkGray)),
+            Span::raw(&popup.threat_message),
+        ]),
+    ];
+
+    if let Some(ref pb) = popup.playbook {
+        lines.push(Line::from(vec![
+            Span::styled("Playbook: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(pb.as_str(), Style::default().fg(Color::Cyan)),
+        ]));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled("Proposed actions:", Style::default().fg(Color::DarkGray))));
+    for action in &popup.actions_display {
+        lines.push(Line::from(format!("  • {}", action)));
+    }
+
+    lines.push(Line::from(""));
+
+    let approve_style = if popup.selected == 0 {
+        Style::default().fg(Color::Black).bg(Color::Green).bold()
+    } else {
+        Style::default().fg(Color::Green)
+    };
+    let deny_style = if popup.selected == 1 {
+        Style::default().fg(Color::Black).bg(Color::Red).bold()
+    } else {
+        Style::default().fg(Color::Red)
+    };
+
+    lines.push(Line::from(vec![
+        Span::raw("  "),
+        Span::styled(" APPROVE ", approve_style),
+        Span::raw("    "),
+        Span::styled("  DENY  ", deny_style),
+    ]));
+
+    lines.push(Line::from(""));
+
+    let msg_display = if popup.editing_message {
+        format!("Note: {}▌", popup.message_buffer)
+    } else if popup.message_buffer.is_empty() {
+        "Press 'm' to add a note".to_string()
+    } else {
+        format!("Note: {}", popup.message_buffer)
+    };
+    lines.push(Line::from(Span::styled(msg_display, Style::default().fg(Color::DarkGray))));
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "↑↓: select │ Enter: confirm │ m: add note │ Esc: dismiss",
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    let paragraph = Paragraph::new(lines)
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Red))
+            .title(" ⚡ Action Required ")
+            .style(Style::default().bg(Color::Black)));
+    f.render_widget(paragraph, popup_area);
+}
+
 /// Run the TUI dashboard, blocking until the user quits.
 ///
 /// Drains alerts from the channel, renders the UI at 10fps, and handles keyboard input.
-pub async fn run_tui(mut alert_rx: mpsc::Receiver<Alert>, config_path: Option<PathBuf>) -> Result<()> {
+pub async fn run_tui(
+    mut alert_rx: mpsc::Receiver<Alert>,
+    config_path: Option<PathBuf>,
+    pending_actions: SharedPendingActions,
+    response_tx: Option<mpsc::Sender<ResponseRequest>>,
+) -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::new();
+    let mut app = App::new(pending_actions, response_tx);
 
     // Load config if provided
     if let Some(path) = config_path {
@@ -1514,6 +1685,25 @@ pub async fn run_tui(mut alert_rx: mpsc::Receiver<Alert>, config_path: Option<Pa
         if !app.paused {
             while let Ok(alert) = alert_rx.try_recv() {
                 app.alert_store.push(alert);
+            }
+        }
+
+        // Check for new pending actions and show popup
+        if app.approval_popup.is_none() {
+            if let Ok(pending) = app.pending_actions.try_lock() {
+                if let Some(action) = pending.iter().find(|a| matches!(a.status, PendingStatus::AwaitingApproval)) {
+                    app.approval_popup = Some(ApprovalPopup {
+                        action_id: action.id.clone(),
+                        threat_source: action.threat_source.clone(),
+                        threat_message: action.threat_message.clone(),
+                        severity: action.severity.clone(),
+                        actions_display: action.actions.iter().map(|a| a.to_string()).collect(),
+                        playbook: action.playbook.clone(),
+                        selected: 1, // default to DENY for safety
+                        message_buffer: String::new(),
+                        editing_message: false,
+                    });
+                }
             }
         }
 
