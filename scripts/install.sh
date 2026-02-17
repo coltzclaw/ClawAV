@@ -90,22 +90,30 @@ fi
 # ── 4b. Auditd tamper-detection rules ────────────────────────────────────────
 log "Installing auditd tamper-detection rules..."
 if command -v auditctl &>/dev/null; then
-    # Watch chattr binary execution — detects attempts to remove immutable flags
-    auditctl -w /usr/bin/chattr -p x -k clawtower-tamper 2>/dev/null \
-        && log "  audit rule: watch /usr/bin/chattr -p x -k clawtower-tamper — OK" \
-        || warn "  audit rule for chattr failed (rules may be locked)"
-    # Watch for direct file access on /etc/clawtower/
-    auditctl -w /etc/clawtower/ -p wa -k clawtower-config 2>/dev/null \
-        && log "  audit rule: watch /etc/clawtower/ -p wa -k clawtower-config — OK" \
-        || warn "  audit rule for /etc/clawtower/ failed (rules may be locked)"
-    # Watch the binary itself
-    auditctl -w /usr/local/bin/clawtower -p wa -k clawtower-config 2>/dev/null \
-        && log "  audit rule: watch /usr/local/bin/clawtower -p wa -k clawtower-config — OK" \
-        || warn "  audit rule for binary failed (rules may be locked)"
-    # Watch the service file
-    auditctl -w /etc/systemd/system/clawtower.service -p wa -k clawtower-config 2>/dev/null \
-        && log "  audit rule: watch clawtower.service -p wa -k clawtower-config — OK" \
-        || warn "  audit rule for service file failed"
+    # Check if audit rules are already locked
+    AUDIT_ENABLED=$(auditctl -s 2>/dev/null | grep -oP 'enabled\s+\K\d+' || echo "0")
+    if [[ "$AUDIT_ENABLED" == "2" ]]; then
+        warn "  Audit rules are locked (enabled=2) — skipping rule additions (reboot to unlock)"
+    else
+        auditctl -l 2>/dev/null | grep -q "clawtower-tamper" \
+            && log "  audit rule clawtower-tamper already exists — skipping" \
+            || { auditctl -w /usr/bin/chattr -p x -k clawtower-tamper 2>/dev/null \
+                && log "  audit rule: watch /usr/bin/chattr -p x -k clawtower-tamper — OK" \
+                || warn "  audit rule for chattr failed"; }
+        auditctl -l 2>/dev/null | grep -q "clawtower-config" \
+            && log "  audit rules clawtower-config already exist — skipping" \
+            || {
+                auditctl -w /etc/clawtower/ -p wa -k clawtower-config 2>/dev/null \
+                    && log "  audit rule: watch /etc/clawtower/ — OK" \
+                    || warn "  audit rule for /etc/clawtower/ failed"
+                auditctl -w /usr/local/bin/clawtower -p wa -k clawtower-config 2>/dev/null \
+                    && log "  audit rule: watch /usr/local/bin/clawtower — OK" \
+                    || warn "  audit rule for binary failed"
+                auditctl -w /etc/systemd/system/clawtower.service -p wa -k clawtower-config 2>/dev/null \
+                    && log "  audit rule: watch clawtower.service — OK" \
+                    || warn "  audit rule for service file failed"
+            }
+    fi
 else
     warn "auditctl not available — skipping tamper-detection audit rules"
 fi
@@ -140,7 +148,7 @@ profile clawtower.deny-openclaw {
 APPARMOR
     apparmor_parser -r /etc/apparmor.d/clawtower.deny-openclaw 2>/dev/null \
         && log "  AppArmor profile clawtower.deny-openclaw loaded" \
-        || warn "  AppArmor profile load failed (non-fatal — may need reboot)"
+        || warn "  AppArmor profile load failed (non-fatal — if re-installing after failed uninstall, reboot first)"
     # Load config protection profile if available
     PROTECT_PROFILE_SRC="$(dirname "$SCRIPT_PATH")/../apparmor/etc.clawtower.protect"
     if [[ -f "$PROTECT_PROFILE_SRC" ]]; then
@@ -210,7 +218,23 @@ cat > /etc/sysctl.d/99-clawtower.conf <<SYSCTL
 kernel.modules_disabled = 1
 kernel.yama.ptrace_scope = ${PTRACE_VALUE}
 SYSCTL
-sysctl -p /etc/sysctl.d/99-clawtower.conf 2>/dev/null && log "  sysctl params applied" || warn "Some sysctl params may need reboot"
+# Apply sysctl params individually for idempotency
+SYSCTL_REBOOT_NEEDED=0
+while IFS='=' read -r key val; do
+    key=$(echo "$key" | xargs)
+    val=$(echo "$val" | xargs)
+    [[ -z "$key" || "$key" == \#* ]] && continue
+    keypath="/proc/sys/${key//\.//}"
+    current=$(cat "$keypath" 2>/dev/null || echo "")
+    if [[ "$current" == "$val" ]]; then
+        log "  $key already at $val — skipping"
+    else
+        sysctl -w "$key=$val" 2>/dev/null \
+            && log "  $key set to $val" \
+            || { warn "  $key=$val failed (current: $current) — needs reboot"; SYSCTL_REBOOT_NEEDED=1; }
+    fi
+done < /etc/sysctl.d/99-clawtower.conf
+[[ $SYSCTL_REBOOT_NEEDED -eq 1 ]] && warn "Some sysctl params could not be applied at runtime — reboot recommended"
 
 # ── 8. Restricted sudoers (Tier 1 hardened) ──────────────────────────────────
 log "Installing hardened sudoers from policies/sudoers-openclaw.conf..."
@@ -231,7 +255,14 @@ chattr +i "$SUDOERS_DEST"
 # ── 9. Lock audit rules ─────────────────────────────────────────────────────
 log "Locking audit rules (immutable until reboot)..."
 if command -v auditctl &>/dev/null; then
-    auditctl -e 2 2>/dev/null || warn "Audit rules may already be locked"
+    AUDIT_ENABLED=$(auditctl -s 2>/dev/null | grep -oP 'enabled\s+\K\d+' || echo "0")
+    if [[ "$AUDIT_ENABLED" == "2" ]]; then
+        log "  Audit rules already locked (enabled=2) — skipping"
+    else
+        auditctl -e 2 2>/dev/null \
+            && log "  Audit rules locked" \
+            || warn "  Failed to lock audit rules"
+    fi
 else
     warn "auditctl not available — skipping audit lock"
 fi
