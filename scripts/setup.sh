@@ -125,8 +125,16 @@ fi
 # ── Create directories ───────────────────────────────────────────────────────
 log "Creating directories..."
 mkdir -p /etc/clawtower/policies /var/log/clawtower /var/run/clawtower
+mkdir -p /etc/clawtower/shadow /etc/clawtower/sentinel-shadow /etc/clawtower/quarantine
 # Ensure agent user can read logs and write to runtime dir
 chown -R "${SUDO_USER:-root}:${SUDO_USER:-root}" /var/log/clawtower /var/run/clawtower 2>/dev/null || true
+
+# Harden shadow and quarantine directories (root-only access)
+log "Hardening shadow/quarantine permissions..."
+chown root:root /etc/clawtower/shadow /etc/clawtower/sentinel-shadow /etc/clawtower/quarantine 2>/dev/null || true
+chmod 0700 /etc/clawtower/shadow /etc/clawtower/sentinel-shadow /etc/clawtower/quarantine
+# Harden any existing shadow files
+find /etc/clawtower/shadow /etc/clawtower/sentinel-shadow -type f -exec chmod 0600 {} \; 2>/dev/null || true
 
 # ── Stop existing service (avoid "Text file busy") ───────────────────────────
 if systemctl is-active --quiet clawtower 2>/dev/null; then

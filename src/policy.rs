@@ -161,12 +161,25 @@ impl PolicyEngine {
         });
 
         let mut all_rules: Vec<PolicyRule> = Vec::new();
+        let mut load_errors: Vec<String> = Vec::new();
         for entry in files {
             let path = entry.path();
-            let content = std::fs::read_to_string(&path)
-                .with_context(|| format!("Failed to read {}", path.display()))?;
-            let pf: PolicyFile = serde_yaml::from_str(&content)
-                .with_context(|| format!("Failed to parse {}", path.display()))?;
+            let content = match std::fs::read_to_string(&path) {
+                Ok(c) => c,
+                Err(e) => {
+                    load_errors.push(format!("Failed to read {}: {}", path.display(), e));
+                    eprintln!("[policy] WARNING: Failed to read policy file {}: {}", path.display(), e);
+                    continue;
+                }
+            };
+            let pf: PolicyFile = match serde_yaml::from_str(&content) {
+                Ok(pf) => pf,
+                Err(e) => {
+                    load_errors.push(format!("Failed to parse {}: {}", path.display(), e));
+                    eprintln!("[policy] WARNING: Malformed YAML in policy file {}: {} — skipping", path.display(), e);
+                    continue;
+                }
+            };
             all_rules = Self::merge_rules(all_rules, pf.rules);
         }
 
@@ -246,12 +259,26 @@ impl PolicyEngine {
             }
         }
 
-        // Command contains (substring in full command)
+        // Command contains (substring/glob in full command)
+        // If pattern contains `*`, use glob matching against the full command.
+        // Otherwise, use simple substring matching.
         if !spec.command_contains.is_empty() {
             if let Some(ref cmd) = event.command {
                 let cmd_lower = cmd.to_lowercase();
                 if spec.command_contains.iter().any(|pattern| {
-                    cmd_lower.contains(&pattern.to_lowercase())
+                    let pat_lower = pattern.to_lowercase();
+                    if pat_lower.contains('*') || pat_lower.contains('?') {
+                        // Glob match: wrap pattern with * on both sides so it acts
+                        // as a "contains" match with glob wildcards
+                        let glob_pat = if pat_lower.starts_with('*') || pat_lower.ends_with('*') {
+                            pat_lower.clone()
+                        } else {
+                            format!("*{}*", pat_lower)
+                        };
+                        glob_match::glob_match(&glob_pat, &cmd_lower)
+                    } else {
+                        cmd_lower.contains(&pat_lower)
+                    }
                 }) {
                     return true;
                 }
@@ -1937,5 +1964,106 @@ rules:
         // The command "cat" doesn't match any command rule, but /etc/shadow in args
         // is checked by file_access patterns
         assert!(v.is_some(), "/etc/shadow in args should trigger file_access rules");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // BUG FIX TESTS — P-1, P-2 from code review 2026-02-17
+    // ═══════════════════════════════════════════════════════════════════
+
+    // P-1: Malformed YAML should not kill all policy detection
+    #[test]
+    fn test_malformed_yaml_does_not_kill_engine() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // Good file
+        std::fs::write(dir.path().join("good.yaml"), r#"
+rules:
+  - name: "good-rule"
+    description: "a valid rule"
+    match:
+      command: ["curl"]
+    action: critical
+"#).unwrap();
+
+        // Malformed file
+        std::fs::write(dir.path().join("bad.yaml"), r#"
+rules:
+  - name: "broken
+    this is not valid yaml: [[[
+"#).unwrap();
+
+        // Another good file
+        std::fs::write(dir.path().join("also_good.yaml"), r#"
+rules:
+  - name: "another-good-rule"
+    description: "also valid"
+    match:
+      command: ["wget"]
+    action: warning
+"#).unwrap();
+
+        let engine = PolicyEngine::load(dir.path());
+        assert!(engine.is_ok(), "load() should not fail due to one bad YAML file");
+        let engine = engine.unwrap();
+        assert!(engine.rule_count() >= 2, "Good rules should still be loaded; got {}", engine.rule_count());
+
+        // Verify good rules work
+        let ev = make_exec_event(&["curl", "http://evil.com"]);
+        assert!(engine.evaluate(&ev).is_some(), "good-rule should still match");
+    }
+
+    // P-2: command_contains with * wildcard should match real commands
+    #[test]
+    fn test_command_contains_glob_wildcard() {
+        let yaml = r#"
+rules:
+  - name: "binary-install-detect"
+    description: "Detect copying files to system dirs"
+    match:
+      command_contains: ["cp * /usr/bin/"]
+    action: critical
+"#;
+        let engine = load_from_str(yaml);
+
+        // Should match: cp somefile /usr/bin/
+        let ev = make_exec_event(&["cp", "backdoor", "/usr/bin/backdoor"]);
+        // full command: "cp backdoor /usr/bin/backdoor"
+        // pattern "cp * /usr/bin/" with glob should match
+        let v = engine.evaluate(&ev);
+        assert!(v.is_some(), "cp <file> /usr/bin/<dest> should match 'cp * /usr/bin/' glob pattern");
+    }
+
+    #[test]
+    fn test_command_contains_glob_no_false_positive() {
+        let yaml = r#"
+rules:
+  - name: "binary-install-detect"
+    description: "Detect copying files to system dirs"
+    match:
+      command_contains: ["cp * /usr/bin/"]
+    action: critical
+"#;
+        let engine = load_from_str(yaml);
+
+        // Should NOT match: cp has no /usr/bin/ target
+        let ev = make_exec_event(&["cp", "file1", "/tmp/file2"]);
+        let v = engine.evaluate(&ev);
+        assert!(v.is_none(), "cp to /tmp should not match 'cp * /usr/bin/' pattern");
+    }
+
+    #[test]
+    fn test_command_contains_literal_still_works() {
+        // Patterns without wildcards should still use substring matching
+        let yaml = r#"
+rules:
+  - name: "ufw-disable"
+    description: "detect ufw disable"
+    match:
+      command_contains: ["ufw disable"]
+    action: critical
+"#;
+        let engine = load_from_str(yaml);
+        let ev = make_exec_event(&["ufw", "disable"]);
+        assert!(engine.evaluate(&ev).is_some(), "literal substring should still work");
     }
 }
