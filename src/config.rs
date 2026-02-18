@@ -660,6 +660,12 @@ pub struct SentinelConfig {
     /// scanning is skipped (change detection still applies).
     #[serde(default = "default_exclude_content_scan")]
     pub exclude_content_scan: Vec<String>,
+    /// Glob patterns for paths that trigger skill intake scanning.
+    /// Files matching these patterns are run through the skill intake
+    /// scanner (social engineering + SecureClaw checks) regardless of
+    /// content_scan_excludes. Blocked skills are quarantined.
+    #[serde(default = "default_skill_intake_paths")]
+    pub skill_intake_paths: Vec<String>,
 }
 
 /// A single path to watch with its glob patterns and policy.
@@ -685,6 +691,13 @@ fn default_shadow_dir() -> String { "/etc/clawtower/sentinel-shadow".to_string()
 fn default_debounce_ms() -> u64 { 200 }
 fn default_scan_content() -> bool { true }
 fn default_max_file_size_kb() -> u64 { 1024 }
+fn default_skill_intake_paths() -> Vec<String> {
+    vec![
+        "**/skills/*/SKILL.md".to_string(),
+        "**/skills/*/README.md".to_string(),
+        "**/skills/*/package.json".to_string(),
+    ]
+}
 
 /// Default paths excluded from content scanning. These are files that
 /// legitimately contain API keys or credentials and should not be flagged
@@ -900,6 +913,7 @@ impl Default for SentinelConfig {
             max_file_size_kb: default_max_file_size_kb(),
             content_scan_excludes: default_content_scan_excludes(),
             exclude_content_scan: default_exclude_content_scan(),
+            skill_intake_paths: default_skill_intake_paths(),
         }
     }
 }
