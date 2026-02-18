@@ -17,6 +17,7 @@ use ed25519_dalek::{Verifier, VerifyingKey, Signature};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
@@ -57,6 +58,8 @@ pub struct SecureClawEngine {
     pub dangerous_commands: Vec<CompiledPattern>,
     pub privacy_rules: Vec<CompiledPattern>,
     pub supply_chain_iocs: Vec<CompiledPattern>,
+    /// Version strings extracted from each JSON database file (keyed by filename stem).
+    pub db_versions: HashMap<String, String>,
 }
 
 /// A single compiled regex pattern with metadata.
@@ -70,7 +73,6 @@ pub struct CompiledPattern {
 
 /// Result of checking text against patterns
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct PatternMatch {
     pub database: String,     // which DB matched
     pub category: String,
@@ -129,7 +131,7 @@ struct ClawHavocIndicators {
 impl SecureClawEngine {
     pub fn load<P: AsRef<Path>>(config_dir: P) -> Result<Self> {
         let config_dir = config_dir.as_ref();
-        
+
         if !config_dir.exists() {
             tracing::warn!("SecureClaw config directory does not exist: {}", config_dir.display());
             return Ok(Self {
@@ -137,7 +139,28 @@ impl SecureClawEngine {
                 dangerous_commands: Vec::new(),
                 privacy_rules: Vec::new(),
                 supply_chain_iocs: Vec::new(),
+                db_versions: HashMap::new(),
             });
+        }
+
+        // Extract version from each database file (best-effort)
+        let mut db_versions = HashMap::new();
+        let db_files = [
+            "injection-patterns",
+            "dangerous-commands",
+            "privacy-rules",
+            "supply-chain-ioc",
+        ];
+        for db_name in &db_files {
+            let file_path = config_dir.join(format!("{}.json", db_name));
+            if file_path.exists() {
+                if let Ok(bytes) = fs::read(&file_path) {
+                    let version = IocBundleVerifier::extract_version(&bytes);
+                    if version != "unknown" {
+                        db_versions.insert(db_name.to_string(), version);
+                    }
+                }
+            }
         }
 
         let injection_patterns = Self::load_injection_patterns(config_dir)?;
@@ -150,7 +173,39 @@ impl SecureClawEngine {
             dangerous_commands,
             privacy_rules,
             supply_chain_iocs,
+            db_versions,
         })
+    }
+
+    /// Load engine with optional IOC signature verification.
+    ///
+    /// If `ioc_pubkey_path` points to a valid Ed25519 public key file,
+    /// each JSON database is verified against its `.sig` sidecar. Warnings
+    /// are logged for unsigned or invalid bundles, but loading proceeds.
+    pub fn load_verified<P: AsRef<Path>>(config_dir: P, ioc_pubkey_path: Option<&Path>) -> Result<Self> {
+        let engine = Self::load(&config_dir)?;
+
+        // Optionally verify signatures
+        if let Some(pubkey_path) = ioc_pubkey_path {
+            if pubkey_path.exists() {
+                match IocBundleVerifier::from_file(pubkey_path) {
+                    Ok(verifier) => {
+                        let config_dir = config_dir.as_ref();
+                        for db_name in &["injection-patterns", "dangerous-commands", "privacy-rules", "supply-chain-ioc"] {
+                            let file_path = config_dir.join(format!("{}.json", db_name));
+                            if file_path.exists() {
+                                verifier.verify_or_warn(&file_path);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to load IOC signing key from {}: {}", pubkey_path.display(), e);
+                    }
+                }
+            }
+        }
+
+        Ok(engine)
     }
 
     fn load_injection_patterns(config_dir: &Path) -> Result<Vec<CompiledPattern>> {
@@ -342,68 +397,34 @@ impl SecureClawEngine {
         Ok(compiled_patterns)
     }
 
-    /// Check text against all patterns
-    #[allow(dead_code)]
+    /// Check text against all patterns.
+    ///
+    /// Each match includes the `db_version` of the database that produced it,
+    /// if the version was extracted during loading.
     pub fn check_text(&self, text: &str) -> Vec<PatternMatch> {
         let mut matches = Vec::new();
 
-        // Check injection patterns
-        for pattern in &self.injection_patterns {
-            if let Some(matched) = pattern.regex.find(text) {
-                matches.push(PatternMatch {
-                    database: "injection_patterns".to_string(),
-                    category: pattern.category.clone(),
-                    pattern_name: pattern.name.clone(),
-                    severity: pattern.severity.clone(),
-                    action: pattern.action.clone(),
-                    matched_text: matched.as_str().to_string(),
-                    db_version: None,
-                });
-            }
-        }
+        let db_checks: &[(&[CompiledPattern], &str, &str)] = &[
+            (&self.injection_patterns, "injection_patterns", "injection-patterns"),
+            (&self.dangerous_commands, "dangerous_commands", "dangerous-commands"),
+            (&self.privacy_rules, "privacy_rules", "privacy-rules"),
+            (&self.supply_chain_iocs, "supply_chain_iocs", "supply-chain-ioc"),
+        ];
 
-        // Check dangerous commands
-        for pattern in &self.dangerous_commands {
-            if let Some(matched) = pattern.regex.find(text) {
-                matches.push(PatternMatch {
-                    database: "dangerous_commands".to_string(),
-                    category: pattern.category.clone(),
-                    pattern_name: pattern.name.clone(),
-                    severity: pattern.severity.clone(),
-                    action: pattern.action.clone(),
-                    matched_text: matched.as_str().to_string(),
-                    db_version: None,
-                });
-            }
-        }
-
-        // Check privacy rules
-        for pattern in &self.privacy_rules {
-            if let Some(matched) = pattern.regex.find(text) {
-                matches.push(PatternMatch {
-                    database: "privacy_rules".to_string(),
-                    category: pattern.category.clone(),
-                    pattern_name: pattern.name.clone(),
-                    severity: pattern.severity.clone(),
-                    action: pattern.action.clone(),
-                    matched_text: matched.as_str().to_string(),
-                    db_version: None,
-                });
-            }
-        }
-
-        // Check supply chain IOCs
-        for pattern in &self.supply_chain_iocs {
-            if let Some(matched) = pattern.regex.find(text) {
-                matches.push(PatternMatch {
-                    database: "supply_chain_iocs".to_string(),
-                    category: pattern.category.clone(),
-                    pattern_name: pattern.name.clone(),
-                    severity: pattern.severity.clone(),
-                    action: pattern.action.clone(),
-                    matched_text: matched.as_str().to_string(),
-                    db_version: None,
-                });
+        for &(patterns, db_name, version_key) in db_checks {
+            let version = self.db_versions.get(version_key).cloned();
+            for pattern in patterns {
+                if let Some(matched) = pattern.regex.find(text) {
+                    matches.push(PatternMatch {
+                        database: db_name.to_string(),
+                        category: pattern.category.clone(),
+                        pattern_name: pattern.name.clone(),
+                        severity: pattern.severity.clone(),
+                        action: pattern.action.clone(),
+                        matched_text: matched.as_str().to_string(),
+                        db_version: version.clone(),
+                    });
+                }
             }
         }
 
@@ -594,6 +615,7 @@ impl SecureClawEngine {
     pub fn check_command(&self, cmd: &str) -> Vec<PatternMatch> {
         let mut matches = Vec::new();
         let cmd_lower = cmd.to_lowercase();
+        let dc_version = self.db_versions.get("dangerous-commands").cloned();
 
         for pattern in &self.dangerous_commands {
             if let Some(matched) = pattern.regex.find(cmd) {
@@ -644,7 +666,7 @@ impl SecureClawEngine {
                     severity: pattern.severity.clone(),
                     action: pattern.action.clone(),
                     matched_text: matched.as_str().to_string(),
-                    db_version: None,
+                    db_version: dc_version.clone(),
                 });
             }
         }
@@ -656,6 +678,7 @@ impl SecureClawEngine {
     #[allow(dead_code)]
     pub fn check_privacy(&self, text: &str) -> Vec<PatternMatch> {
         let mut matches = Vec::new();
+        let pr_version = self.db_versions.get("privacy-rules").cloned();
 
         for pattern in &self.privacy_rules {
             if let Some(matched) = pattern.regex.find(text) {
@@ -666,7 +689,7 @@ impl SecureClawEngine {
                     severity: pattern.severity.clone(),
                     action: pattern.action.clone(),
                     matched_text: matched.as_str().to_string(),
-                    db_version: None,
+                    db_version: pr_version.clone(),
                 });
             }
         }
@@ -677,7 +700,6 @@ impl SecureClawEngine {
 
 /// Metadata about an IOC bundle after verification.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct IocBundleMetadata {
     pub path: String,
     pub version: String,
@@ -690,12 +712,10 @@ pub struct IocBundleMetadata {
 /// Each JSON database can have a corresponding `.sig` file containing a 64-byte
 /// Ed25519 signature over the SHA-256 digest of the JSON content. The verifier
 /// checks this signature against a configurable public key.
-#[allow(dead_code)]
 pub struct IocBundleVerifier {
     pubkey: VerifyingKey,
 }
 
-#[allow(dead_code)]
 impl IocBundleVerifier {
     /// Create a new verifier from raw 32-byte Ed25519 public key bytes.
     pub fn from_bytes(key_bytes: &[u8; 32]) -> Result<Self> {
@@ -1387,5 +1407,28 @@ mod tests {
     fn test_secureclaw_config_ioc_pubkey_default() {
         let config = SecureClawConfig::default();
         assert_eq!(config.ioc_pubkey_path, "/etc/clawtower/ioc-signing-key.pub");
+    }
+
+    #[test]
+    fn test_engine_load_populates_db_versions() {
+        let temp_dir = create_test_patterns_dir();
+        let engine = SecureClawEngine::load(temp_dir.path()).unwrap();
+        // All test JSON files contain "version": "2.0.0"
+        assert_eq!(engine.db_versions.get("injection-patterns"), Some(&"2.0.0".to_string()));
+        assert_eq!(engine.db_versions.get("dangerous-commands"), Some(&"2.0.0".to_string()));
+        assert_eq!(engine.db_versions.get("privacy-rules"), Some(&"2.0.0".to_string()));
+        assert_eq!(engine.db_versions.get("supply-chain-ioc"), Some(&"2.0.0".to_string()));
+    }
+
+    #[test]
+    fn test_check_text_populates_db_version_on_match() {
+        let d = TempDir::new().unwrap();
+        fs::write(d.path().join("supply-chain-ioc.json"),
+            r#"{"version":"2.5.0","suspicious_skill_patterns":["test_payload"]}"#).unwrap();
+        write_empty_files(&d);
+        let engine = SecureClawEngine::load(d.path()).unwrap();
+        let matches = engine.check_text("test_payload here");
+        assert!(!matches.is_empty());
+        assert_eq!(matches[0].db_version, Some("2.5.0".to_string()));
     }
 }
