@@ -534,6 +534,11 @@ impl Default for SentinelConfig {
                     policy: WatchPolicy::Watched,
                 },
                 WatchPathConfig {
+                    path: "/home/openclaw/.openclaw/device.json".to_string(),
+                    patterns: vec!["*".to_string()],
+                    policy: WatchPolicy::Protected,
+                },
+                WatchPathConfig {
                     path: "/home/openclaw/.openclaw/credentials".to_string(),
                     patterns: vec!["*.json".to_string()],
                     policy: WatchPolicy::Protected,

@@ -19,6 +19,8 @@ ClawTower continuously monitors a Linux host where an AI agent (e.g., OpenClaw) 
 
 Critical files are protected with `chattr +i` (immutable). The admin key (`OCAV-` + 64 hex, Argon2-hashed) is generated once, displayed, and never stored. The AI agent cannot stop ClawTower, modify its config, remove immutable flags, or escalate via sudo.
 
+**How it actually works:** `chattr +i` is a Linux ext4 file attribute that prevents even root from modifying or deleting the file until the flag is removed. That's the entire enforcement mechanism. But root can always run `chattr -i` to remove it — so the real defense is that the AI agent doesn't have direct root access (it goes through clawsudo, which denies `chattr` on ClawTower files).
+
 ### Binaries
 
 - **`clawtower`** — Main watchdog binary (TUI dashboard, headless daemon, scanner, updater)

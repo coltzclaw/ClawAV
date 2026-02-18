@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Red Lobster v8 — Clawsudo Pentest Runner
 # Tests clawsudo policy enforcement: bypasses + deny verification
-# Usage: bash scripts/redlobster-v8-run-all.sh [flag15|flag16|all]
+# Usage: bash scripts/redlobster-v8-run-all.sh [flag15|flag16|flag17|all]
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -13,6 +13,7 @@ mkdir -p "$RESULTS_DIR"
 FLAGS=(
     "flag15:redlobster-v8-flag15-direct-sudo.sh:DIRECT SUDO NOPASSWD ABUSE"
     "flag16:redlobster-v8-flag16-clawsudo.sh:CLAWSUDO POLICY AUDIT"
+    "flag17:redlobster-v8-flag17-infostealer.sh:INFOSTEALER DEFENSE"
 )
 
 TARGET="${1:-all}"
@@ -28,10 +29,14 @@ echo "│  clawsudo: $(which clawsudo 2>/dev/null || echo 'NOT FOUND') │"
 echo "└───────────────────────────────────────────────────────┘"
 echo ""
 
-# Verify clawsudo exists
+# Verify clawsudo exists (required for flag15/flag16, not flag17)
 if ! command -v clawsudo &>/dev/null; then
-    echo "❌ clawsudo not found in PATH. Cannot run v8 tests."
-    exit 1
+    if [[ "$TARGET" == "all" ]]; then
+        echo "⚠️  clawsudo not found — flag15/flag16 will be skipped"
+    elif [[ "$TARGET" == "flag15" || "$TARGET" == "flag16" ]]; then
+        echo "❌ clawsudo not found in PATH. Cannot run $TARGET."
+        exit 1
+    fi
 fi
 
 PASS=0

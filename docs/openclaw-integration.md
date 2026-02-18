@@ -38,18 +38,6 @@ All features are controlled via `openclaw:` in `config.yaml`:
 | `plugin_watch` | `false` | Monitor extensions directory |
 | `session_log_audit` | `false` | Enable session log auditd rules |
 
-## Alert Categories
-
-| Category | Severity | Description |
-|----------|----------|-------------|
-| `openclaw:perms:*` | FAIL/WARN | Permission issues on OpenClaw files |
-| `openclaw:symlinks` | FAIL | Suspicious symlinks in state dir |
-| `openclaw:audit:*` | varies | Findings from `openclaw security audit` |
-| `openclaw:drift` | FAIL/WARN | Config drift (FAIL = security regression) |
-| `openclaw:mdns` | WARN | mDNS service advertisement detected |
-| `openclaw:extensions` | WARN | Plugin installed, needs verification |
-| `openclaw:controlui` | FAIL/WARN | Dangerous Control UI settings |
-
 ## Security Fields Tracked for Drift
 
 - `gateway.auth.mode` (regression: `none`)
@@ -59,3 +47,33 @@ All features are controlled via `openclaw:` in `config.yaml`:
 - `logging.redactSensitive` (regression: `off`)
 - `controlUi.dangerouslyDisableDeviceAuth` (regression: `true`)
 - `controlUi.allowInsecureAuth` (regression: `true`)
+
+### Phase 4: Infostealer Defense
+
+Hardens against file-harvesting malware that reads credential files without modifying them (ref: Security Affairs, Feb 2025).
+
+**Targeted files:** `device.json` (device private keys), `openclaw.json` (gateway tokens), `settings.json`, `auth-profiles.json`
+
+**Detection layers:**
+- **Auditd read-watch rules** (`-p r`): Kernel-level detection of credential file reads. Catches interpreter-based reads (python, node) that bypass command-line monitoring
+- **Behavior detection** (`AGENT_SENSITIVE_PATHS`): Detects cat/cp/scp/base64/tar on credential files, interpreter access, and `script -c` wrappers
+- **Sentinel** (Protected policy on `device.json`): Detects key replacement/tampering via inotify (note: inotify cannot detect reads — that's auditd's job)
+- **Credential audit scanner**: Periodically verifies auditd read-watch rules are installed for all critical credential files
+
+**Limitations:**
+- Bulk read correlation (process reads 10+ credential files in 30s) requires time-windowed analysis — not yet implemented
+- Token values in network traffic require DLP-style content inspection — separate effort
+
+## Alert Categories
+
+| Category | Severity | Description |
+|----------|----------|-------------|
+| `openclaw:perms:*` | FAIL/WARN | Permission issues on OpenClaw files |
+| `openclaw:perms:device_key` | FAIL | `device.json` permissions too open |
+| `openclaw:symlinks` | FAIL | Suspicious symlinks in state dir |
+| `openclaw:audit:*` | varies | Findings from `openclaw security audit` |
+| `openclaw:drift` | FAIL/WARN | Config drift (FAIL = security regression) |
+| `openclaw:credential_audit` | FAIL/WARN | Missing auditd read-watch rules for credential files |
+| `openclaw:mdns` | WARN | mDNS service advertisement detected |
+| `openclaw:extensions` | WARN | Plugin installed, needs verification |
+| `openclaw:controlui` | FAIL/WARN | Dangerous Control UI settings |

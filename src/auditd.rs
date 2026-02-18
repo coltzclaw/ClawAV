@@ -35,6 +35,9 @@ pub const RECOMMENDED_AUDIT_RULES: &[&str] = &[
     "-w /home/openclaw/.ssh/id_ed25519 -p r -k clawtower_cred_read",
     "-w /home/openclaw/.ssh/id_rsa -p r -k clawtower_cred_read",
     "-w /home/openclaw/.openclaw/gateway.yaml -p r -k clawtower_cred_read",
+    // Infostealer-targeted files (device keys, gateway tokens)
+    "-w /home/openclaw/.openclaw/device.json -p r -k clawtower_cred_read",
+    "-w /home/openclaw/.openclaw/openclaw.json -p r -k clawtower_cred_read",
     // System credential files (Flag 7 — catches interpreter-based reads)
     "-w /etc/shadow -p r -k clawtower_cred_read",
     "-w /etc/gshadow -p r -k clawtower_cred_read",

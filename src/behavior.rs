@@ -62,6 +62,9 @@ const CRITICAL_READ_PATHS: &[&str] = &[
 const AGENT_SENSITIVE_PATHS: &[&str] = &[
     "auth-profiles.json",
     "gateway.yaml",
+    "device.json",
+    "settings.json",
+    "openclaw.json",
     ".aws/credentials",
     ".ssh/id_ed25519",
     ".ssh/id_rsa",
