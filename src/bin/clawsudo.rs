@@ -233,6 +233,8 @@ const GTFOBINS_PATTERNS: &[&str] = &[
     "systemd-run",
     // find -exec (arbitrary command execution)
     "-exec", "-execdir", "-ok", "-okdir",
+    // chmod SUID/SGID (privilege escalation via setuid bit)
+    "chmod u+s", "chmod +s", "chmod g+s", "chmod 4", "chmod 2",
     // apt/apt-get hooks (arbitrary code via -o)
     "APT::Update::Pre-Invoke", "APT::Update::Post-Invoke",
     "Dpkg::Pre-Invoke", "Dpkg::Post-Invoke",
@@ -431,6 +433,24 @@ fn main() -> ExitCode {
         return ExitCode::from(EXIT_DENIED);
     }
 
+    // GTFOBins check — runs on ALL commands before policy evaluation.
+    // This catches shell escape patterns regardless of whether a policy rule
+    // matches, preventing commands from falling through to the Ask/timeout path.
+    if let Some(reason) = check_gtfobins(&cmd_binary, &args, &full_cmd) {
+        eprintln!("🔴 Blocked by GTFOBins defense: {}", reason);
+        log_line("DENIED-GTFOBINS", &full_cmd);
+        if let Some(ref url) = webhook_url {
+            send_slack_sync(
+                url,
+                &format!(
+                    "🔴 *CRITICAL* clawsudo GTFOBins block: `{}` ({})",
+                    full_cmd, reason
+                ),
+            );
+        }
+        return ExitCode::from(EXIT_DENIED);
+    }
+
     let result = evaluate(&rules, &cmd_binary, &full_cmd);
 
     match result {
@@ -438,22 +458,6 @@ fn main() -> ExitCode {
             ref rule_name,
             enforcement: Enforcement::Allow,
         }) => {
-            // GTFOBins check — even if policy allows, block shell escape patterns
-            if let Some(reason) = check_gtfobins(&cmd_binary, &args, &full_cmd) {
-                eprintln!("🔴 Blocked by GTFOBins defense: {}", reason);
-                log_line("DENIED-GTFOBINS", &full_cmd);
-                if let Some(ref url) = webhook_url {
-                    send_slack_sync(
-                        url,
-                        &format!(
-                            "🔴 *CRITICAL* clawsudo GTFOBins block: `{}` ({})",
-                            full_cmd, reason
-                        ),
-                    );
-                }
-                return ExitCode::from(EXIT_DENIED);
-            }
-
             eprintln!("✅ Allowed by policy: {}", rule_name);
             log_line("ALLOWED", &full_cmd);
             // Execute via sudo
@@ -823,6 +827,34 @@ mod tests {
         let args: Vec<String> = vec!["apt-get".into(), "install".into(), "-o".into(), "Dpkg::Pre-Invoke::=sh".into()];
         let full = "apt-get install -o Dpkg::Pre-Invoke::=sh";
         assert!(check_gtfobins("apt-get", &args, full).is_some(), "Dpkg hook should be denied");
+    }
+
+    #[test]
+    fn test_gtfobins_chmod_suid_denied() {
+        let args: Vec<String> = vec!["chmod".into(), "u+s".into(), "/usr/bin/find".into()];
+        let full = "chmod u+s /usr/bin/find";
+        assert!(check_gtfobins("chmod", &args, full).is_some(), "chmod u+s should be denied");
+    }
+
+    #[test]
+    fn test_gtfobins_chmod_plus_s_denied() {
+        let args: Vec<String> = vec!["chmod".into(), "+s".into(), "/usr/bin/python3".into()];
+        let full = "chmod +s /usr/bin/python3";
+        assert!(check_gtfobins("chmod", &args, full).is_some(), "chmod +s should be denied");
+    }
+
+    #[test]
+    fn test_gtfobins_chmod_4755_denied() {
+        let args: Vec<String> = vec!["chmod".into(), "4755".into(), "/usr/bin/find".into()];
+        let full = "chmod 4755 /usr/bin/find";
+        assert!(check_gtfobins("chmod", &args, full).is_some(), "chmod 4xxx should be denied");
+    }
+
+    #[test]
+    fn test_gtfobins_chmod_755_allowed() {
+        let args: Vec<String> = vec!["chmod".into(), "755".into(), "/tmp/script.sh".into()];
+        let full = "chmod 755 /tmp/script.sh";
+        assert!(check_gtfobins("chmod", &args, full).is_none(), "chmod 755 should be allowed");
     }
 
     // ─── Approval file security tests ───
