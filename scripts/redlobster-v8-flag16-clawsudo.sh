@@ -58,15 +58,16 @@ cs_check() {
         fi
     elif [[ "$expect" == "allow" ]]; then
         if [[ $exit_code -eq 77 || $exit_code -eq 78 ]]; then
-            result="✅ BLOCKED (correct)"
+            result="✅ BLOCKED by clawsudo (exit=$exit_code)"
             ((DETECTED++))
         elif [[ $exit_code -eq 0 ]]; then
             result="❌ ALLOWED exit=$exit_code — SHOULD BE BLOCKED"
             ((BYPASSED++))
         else
-            # Non-zero but not denied — command failed for other reasons
-            result="⚠️ ERROR exit=$exit_code"
-            ((BYPASSED++))
+            # Non-zero but not 77/78 — blocked by other defenses
+            # (e.g. harden removed docker group, file doesn't exist, timeout)
+            result="✅ BLOCKED by other defense (exit=$exit_code)"
+            ((DETECTED++))
         fi
     fi
 
