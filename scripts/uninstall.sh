@@ -690,7 +690,9 @@ fi
 echo ""
 info "── Configuration ──"
 if [[ -d /etc/clawtower ]]; then
-    sudo find /etc/clawtower -type f -exec chattr -ia {} \; 2>/dev/null || true
+    # Strip immutable from ALL files and directories (not just files)
+    sudo find /etc/clawtower -exec chattr -ia {} \; 2>/dev/null || true
+    sudo chattr -ia /etc/clawtower 2>/dev/null || true
     sudo rm -rf /etc/clawtower
     log "  Removed /etc/clawtower/"
     REMOVED+=("config directory")

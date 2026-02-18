@@ -30,6 +30,9 @@ fi
 # ── 2. Install binary and config ─────────────────────────────────────────────
 log "Installing binary and config..."
 mkdir -p /etc/clawtower /var/log/clawtower /var/run/clawtower
+systemctl stop clawtower 2>/dev/null || true
+chattr -i /usr/local/bin/clawtower 2>/dev/null || true
+chattr -i /etc/clawtower/config.toml 2>/dev/null || true
 cp "$BINARY_SRC" /usr/local/bin/clawtower
 chmod 755 /usr/local/bin/clawtower
 cp "$CONFIG_SRC" /etc/clawtower/config.toml

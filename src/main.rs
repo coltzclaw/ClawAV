@@ -86,6 +86,7 @@ USAGE:
 COMMANDS:
     run                  Start the watchdog with TUI dashboard (default)
     run --headless       Start in headless mode (no TUI, log to stderr)
+    install [--force]    Bootstrap /etc/clawtower with default config + directories
     status               Show service status and recent alerts
     configure            Interactive configuration wizard
     update               Self-update to latest GitHub release
@@ -201,6 +202,81 @@ fn run_script(name: &str, extra_args: &[String]) -> Result<()> {
     Ok(())
 }
 
+/// Bootstrap /etc/clawtower with default config and directory structure.
+/// With --force, overwrites existing config and policies.
+fn run_install(force: bool) -> Result<()> {
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+
+    let conf_dir = Path::new("/etc/clawtower");
+    let dirs = [
+        conf_dir.to_path_buf(),
+        conf_dir.join("policies"),
+        conf_dir.join("secureclaw"),
+        conf_dir.join("sentinel-shadow"),
+        conf_dir.join("quarantine"),
+        PathBuf::from("/var/log/clawtower"),
+        PathBuf::from("/var/run/clawtower"),
+    ];
+
+    eprintln!("🛡️  ClawTower Install{}", if force { " (--force)" } else { "" });
+    eprintln!("====================\n");
+
+    if force {
+        // Remove immutable flags so we can overwrite
+        let _ = std::process::Command::new("chattr")
+            .args(["-i", "-R", conf_dir.to_str().unwrap_or_default()])
+            .status();
+    }
+
+    // Create directories
+    for dir in &dirs {
+        if !dir.exists() {
+            fs::create_dir_all(dir)?;
+            eprintln!("  Created {}", dir.display());
+        }
+    }
+
+    // Restrict sensitive dirs
+    for dir_name in &["sentinel-shadow", "quarantine"] {
+        let dir = conf_dir.join(dir_name);
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))?;
+    }
+
+    // Write default config (embedded at compile time from repo root)
+    let config_path = conf_dir.join("config.toml");
+    if force || !config_path.exists() {
+        fs::write(&config_path, include_str!("../config.toml"))?;
+        eprintln!("  Wrote default config to {}", config_path.display());
+    } else {
+        eprintln!("  Config already exists: {} (use --force to overwrite)", config_path.display());
+    }
+
+    // Write default policy
+    let default_policy = conf_dir.join("policies/default.yaml");
+    if force || !default_policy.exists() {
+        // Check if we can find a default.yaml in the source tree
+        if let Some(scripts_dir) = find_scripts_dir() {
+            let source_policy = scripts_dir.parent()
+                .map(|p| p.join("policies/default.yaml"));
+            if let Some(ref sp) = source_policy {
+                if sp.exists() {
+                    fs::copy(sp, &default_policy)?;
+                    eprintln!("  Copied default policy to {}", default_policy.display());
+                }
+            }
+        }
+    }
+
+    eprintln!("\n✅ ClawTower installed. Next steps:");
+    eprintln!("  1. Edit /etc/clawtower/config.toml (set watched_user, Slack webhook, etc.)");
+    eprintln!("  2. Run: clawtower configure    (interactive wizard)");
+    eprintln!("  3. Run: clawtower              (start the dashboard)");
+    eprintln!("  4. Run: clawtower harden       (apply tamper-proof hardening)");
+
+    Ok(())
+}
+
 /// Check privileges and re-exec via sudo BEFORE tokio starts.
 /// This ensures the password prompt isn't clobbered by async tasks.
 fn ensure_root() {
@@ -286,8 +362,18 @@ async fn async_main() -> Result<()> {
         "update" => {
             return update::run_update(&rest_args);
         }
+        "install" => {
+            let force = rest_args.iter().any(|a| a == "--force" || a == "-f");
+            return run_install(force);
+        }
         "configure" => {
-            return run_script("configure.sh", &rest_args);
+            // Remove immutable flag so configure.sh can edit config
+            let conf = Path::new("/etc/clawtower/config.toml");
+            let _ = std::process::Command::new("chattr").args(["-i", conf.to_str().unwrap_or_default()]).status();
+            let result = run_script("configure.sh", &rest_args);
+            // Re-lock config after configure
+            let _ = std::process::Command::new("chattr").args(["+i", conf.to_str().unwrap_or_default()]).status();
+            return result;
         }
         "setup" => {
             return run_script("setup.sh", &rest_args);

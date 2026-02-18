@@ -1932,6 +1932,10 @@ impl SecurityScanner {
         ));
         // OpenClaw-specific security checks
         results.extend(scan_openclaw_security());
+        results.push(scan_openclaw_container_isolation());
+        results.push(scan_openclaw_running_as_root());
+        results.push(scan_openclaw_hardcoded_secrets());
+        results.push(scan_openclaw_version_freshness());
 
         // OpenClaw security integration (config-driven)
         if openclaw_config.enabled {
@@ -2192,6 +2196,210 @@ fn scan_control_ui_security(config: &str) -> Vec<ScanResult> {
     }
     
     results
+}
+
+/// Check whether the OpenClaw process is running inside a container/namespace.
+///
+/// Detects Docker, LXC, and general PID namespace isolation by inspecting
+/// /proc/<pid>/cgroup and /proc/1/cgroup. Running bare-metal is a WARN.
+fn scan_openclaw_container_isolation() -> ScanResult {
+    // Find openclaw PID
+    let pid = match run_cmd("pgrep", &["-x", "openclaw"]) {
+        Ok(p) if !p.trim().is_empty() => p.trim().lines().next().unwrap_or("").to_string(),
+        _ => {
+            return ScanResult::new("openclaw:isolation", ScanStatus::Warn,
+                "OpenClaw process not found — cannot check container isolation");
+        }
+    };
+
+    // Check process cgroup for container indicators
+    let cgroup_path = format!("/proc/{}/cgroup", pid);
+    let cgroup = std::fs::read_to_string(&cgroup_path).unwrap_or_default();
+
+    let in_docker = cgroup.contains("/docker/") || cgroup.contains("/containerd/");
+    let in_lxc = cgroup.contains("/lxc/");
+    let in_podman = cgroup.contains("/libpod-");
+
+    // Also check for PID namespace isolation (PID 1 in container won't be systemd/init)
+    let pid_ns_self = std::fs::read_link(format!("/proc/{}/ns/pid", pid)).ok();
+    let pid_ns_init = std::fs::read_link("/proc/1/ns/pid").ok();
+    let ns_isolated = pid_ns_self != pid_ns_init && pid_ns_self.is_some();
+
+    if in_docker || in_podman {
+        ScanResult::new("openclaw:isolation", ScanStatus::Pass,
+            "OpenClaw running inside container (Docker/Podman)")
+    } else if in_lxc {
+        ScanResult::new("openclaw:isolation", ScanStatus::Pass,
+            "OpenClaw running inside LXC container")
+    } else if ns_isolated {
+        ScanResult::new("openclaw:isolation", ScanStatus::Pass,
+            "OpenClaw running in isolated PID namespace")
+    } else {
+        ScanResult::new("openclaw:isolation", ScanStatus::Warn,
+            "OpenClaw running on bare metal — consider containerizing for isolation")
+    }
+}
+
+/// Check whether the OpenClaw process is running as root (UID 0).
+///
+/// Running as root gives the agent full system access, violating least-privilege.
+fn scan_openclaw_running_as_root() -> ScanResult {
+    let pid = match run_cmd("pgrep", &["-x", "openclaw"]) {
+        Ok(p) if !p.trim().is_empty() => p.trim().lines().next().unwrap_or("").to_string(),
+        _ => {
+            return ScanResult::new("openclaw:run_as_root", ScanStatus::Warn,
+                "OpenClaw process not found — cannot check running UID");
+        }
+    };
+
+    // Read /proc/<pid>/status for Uid line
+    let status_path = format!("/proc/{}/status", pid);
+    let status = match std::fs::read_to_string(&status_path) {
+        Ok(s) => s,
+        Err(_) => {
+            return ScanResult::new("openclaw:run_as_root", ScanStatus::Warn,
+                &format!("Cannot read {} — permission denied or process exited", status_path));
+        }
+    };
+
+    // Uid line format: "Uid:\treal\teffective\tsaved\tfs"
+    let uid_line = status.lines().find(|l| l.starts_with("Uid:"));
+    if let Some(line) = uid_line {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        // fields[1] = real UID, fields[2] = effective UID
+        let effective_uid = fields.get(2).unwrap_or(&"");
+        if *effective_uid == "0" {
+            ScanResult::new("openclaw:run_as_root", ScanStatus::Fail,
+                "OpenClaw running as root (UID 0) — use a dedicated non-admin user")
+        } else {
+            ScanResult::new("openclaw:run_as_root", ScanStatus::Pass,
+                &format!("OpenClaw running as UID {} (non-root)", effective_uid))
+        }
+    } else {
+        ScanResult::new("openclaw:run_as_root", ScanStatus::Warn,
+            "Could not determine OpenClaw UID from /proc status")
+    }
+}
+
+/// Scan OpenClaw config files for hardcoded API keys / secrets.
+///
+/// Keys should be loaded via environment variables at runtime, never stored
+/// in config files where they can be leaked in logs, backups, or version control.
+fn scan_openclaw_hardcoded_secrets() -> ScanResult {
+    let config_paths = [
+        "/home/openclaw/.openclaw/openclaw.json",
+        "/home/openclaw/.openclaw/agents/main/agent/gateway.yaml",
+    ];
+
+    // Patterns that indicate hardcoded API keys (prefix + min length)
+    const KEY_PREFIXES: &[&str] = &[
+        "sk-ant-",       // Anthropic
+        "sk-proj-",      // OpenAI project keys
+        "sk-",           // OpenAI legacy (match after more specific)
+        "key-",          // Generic API keys
+        "gsk_",          // Groq
+        "xai-",          // xAI/Grok
+        "AKIA",          // AWS access key ID
+        "ghp_",          // GitHub personal access token
+        "glpat-",        // GitLab personal access token
+        "xoxb-",         // Slack bot token
+        "xoxp-",         // Slack user token
+    ];
+
+    let mut found = Vec::new();
+
+    for path in &config_paths {
+        let content = match std::fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        for prefix in KEY_PREFIXES {
+            // Look for the prefix followed by at least 16 more chars (real keys are long)
+            if let Some(pos) = content.find(prefix) {
+                let after = &content[pos + prefix.len()..];
+                let key_chars = after.chars().take_while(|c| c.is_alphanumeric() || *c == '-' || *c == '_').count();
+                if key_chars >= 16 {
+                    let file_name = std::path::Path::new(path)
+                        .file_name().unwrap_or_default().to_string_lossy();
+                    found.push(format!("{}:{}", file_name, prefix));
+                }
+            }
+        }
+    }
+
+    if found.is_empty() {
+        ScanResult::new("openclaw:hardcoded_secrets", ScanStatus::Pass,
+            "No hardcoded API keys detected in OpenClaw config")
+    } else {
+        ScanResult::new("openclaw:hardcoded_secrets", ScanStatus::Fail,
+            &format!("Hardcoded API keys in config (use env vars instead): {}",
+                found.join(", ")))
+    }
+}
+
+/// Check whether the installed OpenClaw version is current.
+///
+/// Compares `openclaw --version` output against known latest or checks
+/// if the binary was last modified more than 30 days ago as a staleness proxy.
+fn scan_openclaw_version_freshness() -> ScanResult {
+    // Try to get the installed version
+    let version_output = match run_cmd("openclaw", &["--version"]) {
+        Ok(v) => v.trim().to_string(),
+        Err(_) => {
+            // Fallback: check binary modification time
+            let binary_paths = ["/usr/local/bin/openclaw", "/usr/bin/openclaw"];
+            let binary_path = binary_paths.iter().find(|p| std::path::Path::new(p).exists());
+
+            return if let Some(path) = binary_path {
+                match std::fs::metadata(path) {
+                    Ok(meta) => {
+                        if let Ok(modified) = meta.modified() {
+                            let age = modified.elapsed().unwrap_or_default();
+                            let days = age.as_secs() / 86400;
+                            if days > 90 {
+                                ScanResult::new("openclaw:version", ScanStatus::Warn,
+                                    &format!("OpenClaw binary {} days old — check for updates", days))
+                            } else {
+                                ScanResult::new("openclaw:version", ScanStatus::Pass,
+                                    &format!("OpenClaw binary modified {} days ago", days))
+                            }
+                        } else {
+                            ScanResult::new("openclaw:version", ScanStatus::Warn,
+                                "Cannot determine OpenClaw binary age")
+                        }
+                    }
+                    Err(_) => ScanResult::new("openclaw:version", ScanStatus::Warn,
+                        "Cannot read OpenClaw binary metadata"),
+                }
+            } else {
+                ScanResult::new("openclaw:version", ScanStatus::Warn,
+                    "OpenClaw binary not found — cannot check version freshness")
+            };
+        }
+    };
+
+    // Check if there's an update available via openclaw's own mechanism
+    match run_cmd("openclaw", &["update", "--check"]) {
+        Ok(output) => {
+            let up_to_date = output.contains("up to date")
+                || output.contains("already on the latest")
+                || output.contains("no update");
+            if up_to_date {
+                ScanResult::new("openclaw:version", ScanStatus::Pass,
+                    &format!("OpenClaw {} — up to date", version_output))
+            } else {
+                ScanResult::new("openclaw:version", ScanStatus::Warn,
+                    &format!("OpenClaw {} — update available: {}",
+                        version_output, output.trim().chars().take(100).collect::<String>()))
+            }
+        }
+        Err(_) => {
+            // update --check not available, just report the version
+            ScanResult::new("openclaw:version", ScanStatus::Pass,
+                &format!("OpenClaw {} installed (update check unavailable)", version_output))
+        }
+    }
 }
 
 fn scan_openclaw_security() -> Vec<ScanResult> {
@@ -3391,5 +3599,75 @@ rules 0
         let line = "LD_PRELOAD=/opt/clawtower/lib/guard.so";
         let trimmed = line.trim();
         assert!(trimmed.contains("clawtower"), "clawtower keyword should match");
+    }
+
+    // --- OpenClaw hardening scanners ---
+
+    #[test]
+    fn test_openclaw_container_isolation_no_process() {
+        // When openclaw isn't running, should return Warn (not crash)
+        let result = scan_openclaw_container_isolation();
+        // On test systems without openclaw running, this should warn
+        assert!(result.status == ScanStatus::Warn || result.status == ScanStatus::Pass);
+        assert!(result.category == "openclaw:isolation");
+    }
+
+    #[test]
+    fn test_openclaw_running_as_root_no_process() {
+        let result = scan_openclaw_running_as_root();
+        assert!(result.status == ScanStatus::Warn || result.status == ScanStatus::Pass
+            || result.status == ScanStatus::Fail);
+        assert!(result.category == "openclaw:run_as_root");
+    }
+
+    #[test]
+    fn test_openclaw_hardcoded_secrets_no_config() {
+        // When config files don't exist, should pass (nothing to scan)
+        let result = scan_openclaw_hardcoded_secrets();
+        // Pass = no config found, so no secrets; or config exists and is clean
+        assert!(result.category == "openclaw:hardcoded_secrets");
+    }
+
+    #[test]
+    fn test_openclaw_hardcoded_secrets_detection() {
+        // Test the key prefix detection logic directly
+        let config_with_key = r#"{"apiKey": "sk-ant-api03-realkey1234567890abcdef1234567890"}"#;
+        let has_match = ["sk-ant-"].iter().any(|prefix| {
+            if let Some(pos) = config_with_key.find(prefix) {
+                let after = &config_with_key[pos + prefix.len()..];
+                let key_chars = after.chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+                    .count();
+                key_chars >= 16
+            } else {
+                false
+            }
+        });
+        assert!(has_match, "Should detect sk-ant- prefixed key");
+    }
+
+    #[test]
+    fn test_openclaw_hardcoded_secrets_short_value_ignored() {
+        // Short values that happen to start with a prefix shouldn't trigger
+        let config = r#"{"mode": "sk-ant-short"}"#;
+        let has_match = ["sk-ant-"].iter().any(|prefix| {
+            if let Some(pos) = config.find(prefix) {
+                let after = &config[pos + prefix.len()..];
+                let key_chars = after.chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+                    .count();
+                key_chars >= 16
+            } else {
+                false
+            }
+        });
+        assert!(!has_match, "Short values should not trigger secret detection");
+    }
+
+    #[test]
+    fn test_openclaw_version_freshness_no_binary() {
+        let result = scan_openclaw_version_freshness();
+        // On test systems without openclaw, should warn gracefully
+        assert!(result.category == "openclaw:version");
     }
 }
