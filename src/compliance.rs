@@ -113,7 +113,74 @@ pub static CONTROL_MAPPINGS: &[ControlMapping] = &[
         cis_controls: &["5.4"],
         mitre_attack: &["T1548.001"],
     },
+    ControlMapping {
+        clawtower_category: "behavior:social_engineering",
+        soc2_controls: &["CC6.8", "CC7.2"],
+        nist_controls: &["SI-3", "SI-4"],
+        cis_controls: &["2.7", "13.1"],
+        mitre_attack: &["T1204", "T1566"],
+    },
+    ControlMapping {
+        clawtower_category: "secureclaw:supply_chain",
+        soc2_controls: &["CC6.8", "CC8.1"],
+        nist_controls: &["SI-3", "SI-7"],
+        cis_controls: &["2.7", "16.1"],
+        mitre_attack: &["T1195"],
+    },
+    ControlMapping {
+        clawtower_category: "sentinel:skill_intake",
+        soc2_controls: &["CC6.8", "CC8.1"],
+        nist_controls: &["SI-3", "SI-7"],
+        cis_controls: &["2.7", "16.1"],
+        mitre_attack: &["T1195.002"],
+    },
 ];
+
+// ---------------------------------------------------------------------------
+// MITRE ATT&CK technique metadata
+// ---------------------------------------------------------------------------
+
+/// Rich metadata for a MITRE ATT&CK technique, providing human-readable
+/// names and tactic classifications for technique IDs referenced in control mappings.
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct MitreTechnique {
+    pub technique_id: &'static str,
+    pub technique_name: &'static str,
+    pub tactic: &'static str,
+}
+
+/// All MITRE ATT&CK techniques referenced by ClawTower control mappings.
+#[allow(dead_code)]
+pub static MITRE_ATTACK_TECHNIQUES: &[MitreTechnique] = &[
+    MitreTechnique { technique_id: "T1041", technique_name: "Exfiltration Over C2 Channel", tactic: "Exfiltration" },
+    MitreTechnique { technique_id: "T1048", technique_name: "Exfiltration Over Alternative Protocol", tactic: "Exfiltration" },
+    MitreTechnique { technique_id: "T1068", technique_name: "Exploitation for Privilege Escalation", tactic: "Privilege Escalation" },
+    MitreTechnique { technique_id: "T1548", technique_name: "Abuse Elevation Control Mechanism", tactic: "Privilege Escalation" },
+    MitreTechnique { technique_id: "T1548.001", technique_name: "Setuid and Setgid", tactic: "Privilege Escalation" },
+    MitreTechnique { technique_id: "T1565", technique_name: "Data Manipulation", tactic: "Impact" },
+    MitreTechnique { technique_id: "T1485", technique_name: "Data Destruction", tactic: "Impact" },
+    MitreTechnique { technique_id: "T1562.004", technique_name: "Disable or Modify System Firewall", tactic: "Defense Evasion" },
+    MitreTechnique { technique_id: "T1078", technique_name: "Valid Accounts", tactic: "Defense Evasion" },
+    MitreTechnique { technique_id: "T1070", technique_name: "Indicator Removal", tactic: "Defense Evasion" },
+    MitreTechnique { technique_id: "T1082", technique_name: "System Information Discovery", tactic: "Discovery" },
+    MitreTechnique { technique_id: "T1033", technique_name: "System Owner/User Discovery", tactic: "Discovery" },
+    MitreTechnique { technique_id: "T1053", technique_name: "Scheduled Task/Job", tactic: "Persistence" },
+    MitreTechnique { technique_id: "T1546", technique_name: "Event Triggered Execution", tactic: "Persistence" },
+    MitreTechnique { technique_id: "T1611", technique_name: "Escape to Host", tactic: "Privilege Escalation" },
+    MitreTechnique { technique_id: "T1204", technique_name: "User Execution", tactic: "Execution" },
+    MitreTechnique { technique_id: "T1566", technique_name: "Phishing", tactic: "Initial Access" },
+    MitreTechnique { technique_id: "T1195", technique_name: "Supply Chain Compromise", tactic: "Initial Access" },
+    MitreTechnique { technique_id: "T1195.002", technique_name: "Compromise Software Supply Chain", tactic: "Initial Access" },
+];
+
+/// Look up rich metadata for a MITRE ATT&CK technique by its ID.
+///
+/// Returns `None` if the technique ID is not in the known table.
+#[allow(dead_code)]
+pub fn lookup_mitre_technique(technique_id: &str) -> Option<&'static MitreTechnique> {
+    MITRE_ATTACK_TECHNIQUES.iter().find(|t| t.technique_id == technique_id)
+}
 
 // ---------------------------------------------------------------------------
 // Report types
@@ -837,6 +904,26 @@ mod tests {
             mapping.mitre_attack.contains(&"T1048"),
             "data_exfiltration should map to T1048 (Exfiltration Over Alternative Protocol)"
         );
+    }
+
+    #[test]
+    fn test_mitre_technique_lookup_t1048() {
+        let tech = lookup_mitre_technique("T1048").unwrap();
+        assert_eq!(tech.technique_id, "T1048");
+        assert_eq!(tech.tactic, "Exfiltration");
+        assert!(!tech.technique_name.is_empty());
+    }
+
+    #[test]
+    fn test_mitre_technique_lookup_unknown() {
+        assert!(lookup_mitre_technique("T9999").is_none());
+    }
+
+    #[test]
+    fn test_supply_chain_categories_have_mappings() {
+        assert!(lookup_controls("behavior:social_engineering").is_some());
+        assert!(lookup_controls("secureclaw:supply_chain").is_some());
+        assert!(lookup_controls("sentinel:skill_intake").is_some());
     }
 
     #[test]
