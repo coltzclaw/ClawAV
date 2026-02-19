@@ -268,6 +268,10 @@ The `[network] log_prefix` in config **must exactly match** the `--log-prefix` i
 
 Standalone sudo gatekeeper. Fail-secure: no rules → deny all. Exit codes: 0 (ok), 1 (fail), 77 (denied), 78 (timeout).
 
+### Grouped `use` Imports Hide from Simple Greps
+
+When refactoring module paths, `use crate::{netpolicy, proxy, ...}` does **not** match a grep for `crate::netpolicy`. Always search for the bare module name (e.g., `netpolicy::`) in addition to the fully-qualified path when doing import refactoring.
+
 ---
 
 ## Configuration
