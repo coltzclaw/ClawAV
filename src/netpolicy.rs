@@ -109,30 +109,79 @@ impl NetPolicy {
 #[allow(dead_code)]
 fn extract_host_from_url(s: &str) -> Option<String> {
     let s = s.trim_matches(|c: char| c == '"' || c == '\'' || c == '`');
-    
-    // Handle http(s)://host/... patterns
-    if let Some(rest) = s.strip_prefix("http://").or_else(|| s.strip_prefix("https://")) {
-        let host_port = rest.split('/').next()?;
-        let host = host_port.split(':').next()?;
-        let host = host.split('@').next_back()?; // handle user@host
-        if host.contains('.') || host == "localhost" {
-            return Some(host.to_lowercase());
+
+    // Strip scheme — support http, https, ftp, ssh, s3, git, rsync, tcp, udp
+    let rest = if let Some(idx) = s.find("://") {
+        &s[idx + 3..]
+    } else {
+        return None;
+    };
+
+    // Strip userinfo (user:pass@)
+    let after_userinfo = if let Some(at_idx) = rest.find('@') {
+        let slash_idx = rest.find('/').unwrap_or(rest.len());
+        if at_idx < slash_idx {
+            &rest[at_idx + 1..]
+        } else {
+            rest
         }
+    } else {
+        rest
+    };
+
+    // Handle IPv6: [::1]:port/path
+    if after_userinfo.starts_with('[') {
+        if let Some(bracket_end) = after_userinfo.find(']') {
+            let ipv6 = &after_userinfo[1..bracket_end];
+            return Some(ipv6.to_lowercase());
+        }
+        return None;
     }
-    
-    None
+
+    // Extract host (before : or /)
+    let host_port = after_userinfo.split('/').next()?;
+    let host = host_port.split(':').next()?;
+    if host.contains('.') || host == "localhost" {
+        Some(host.to_lowercase())
+    } else {
+        None
+    }
 }
 
 /// Extract port from a URL-like string
 #[allow(dead_code)]
 fn extract_port_from_url(s: &str) -> Option<u16> {
     let s = s.trim_matches(|c: char| c == '"' || c == '\'' || c == '`');
-    if let Some(rest) = s.strip_prefix("http://").or_else(|| s.strip_prefix("https://")) {
-        let host_port = rest.split('/').next()?;
-        let parts: Vec<&str> = host_port.split(':').collect();
-        if parts.len() == 2 {
-            return parts[1].parse().ok();
+    let rest = if let Some(idx) = s.find("://") {
+        &s[idx + 3..]
+    } else {
+        return None;
+    };
+
+    // Strip userinfo
+    let after_userinfo = if let Some(at_idx) = rest.find('@') {
+        let slash_idx = rest.find('/').unwrap_or(rest.len());
+        if at_idx < slash_idx { &rest[at_idx + 1..] } else { rest }
+    } else {
+        rest
+    };
+
+    // Handle IPv6: [::1]:port
+    if after_userinfo.starts_with('[') {
+        if let Some(bracket_end) = after_userinfo.find(']') {
+            let after_bracket = &after_userinfo[bracket_end + 1..];
+            if let Some(port_str) = after_bracket.strip_prefix(':') {
+                let port_str = port_str.split('/').next()?;
+                return port_str.parse().ok();
+            }
         }
+        return None;
+    }
+
+    let host_port = after_userinfo.split('/').next()?;
+    let parts: Vec<&str> = host_port.split(':').collect();
+    if parts.len() == 2 {
+        return parts[1].parse().ok();
     }
     None
 }
@@ -355,12 +404,11 @@ mod tests {
 
     #[test]
     fn test_extract_host_with_auth_bypass() {
-        // BUG: user:pass@host URLs are not parsed correctly
-        // The code splits on ':' before '@', so "user:pass@evil.com" → host="user"
+        // FIXED: auth URLs now correctly extract host
+        // Previously split on ':' before '@', so "user:pass@evil.com" → host="user"
         let url = "https://user:pass@evil.com/exfil";
         let host = extract_host_from_url(url);
-        // This returns None because "user" doesn't contain '.' and isn't "localhost"
-        assert_eq!(host, None); // BUG: auth URLs bypass host extraction entirely
+        assert_eq!(host, Some("evil.com".to_string()));
     }
 
     #[test]
@@ -387,8 +435,9 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_host_ftp_not_supported() {
-        assert_eq!(extract_host_from_url("ftp://files.evil.com/data"), None);
+    fn test_extract_host_ftp_now_supported() {
+        // FIXED: ftp:// scheme now supported alongside http/https/ssh/s3/git/rsync
+        assert_eq!(extract_host_from_url("ftp://files.evil.com/data"), Some("files.evil.com".to_string()));
     }
 
     #[test]
@@ -452,12 +501,11 @@ mod tests {
     // --- IPv4/IPv6 handling ---
 
     #[test]
-    fn test_allowlist_ipv6_not_extracted() {
-        // IPv6 addresses in URLs aren't handled by extract_host_from_url
+    fn test_allowlist_ipv6_extracted() {
+        // FIXED: IPv6 bracket notation now correctly parsed
         let url = "http://[::1]:8080/path";
         let host = extract_host_from_url(url);
-        // [::1] doesn't contain '.' and isn't "localhost", so returns None
-        assert!(host.is_none());
+        assert_eq!(host, Some("::1".to_string()));
     }
 
     // --- Localhost/LAN ---
@@ -523,5 +571,37 @@ mod tests {
     fn test_allowlist_allowed_host_allowed_port() {
         let policy = make_allowlist_policy();
         assert!(policy.check_connection("api.anthropic.com", 443).is_none());
+    }
+
+    // --- H2/M26/M27 fix: multi-scheme, userinfo, IPv6 ---
+
+    #[test]
+    fn test_extract_host_ftp() {
+        assert_eq!(extract_host_from_url("ftp://files.evil.com/data"), Some("files.evil.com".to_string()));
+    }
+
+    #[test]
+    fn test_extract_host_ssh() {
+        assert_eq!(extract_host_from_url("ssh://user@evil.com"), Some("evil.com".to_string()));
+    }
+
+    #[test]
+    fn test_extract_host_s3() {
+        assert_eq!(extract_host_from_url("s3://my-bucket.s3.amazonaws.com/key"), Some("my-bucket.s3.amazonaws.com".to_string()));
+    }
+
+    #[test]
+    fn test_extract_host_with_userinfo() {
+        assert_eq!(extract_host_from_url("https://user:pass@evil.com/exfil"), Some("evil.com".to_string()));
+    }
+
+    #[test]
+    fn test_extract_host_ipv6() {
+        assert_eq!(extract_host_from_url("http://[::1]:8080/path"), Some("::1".to_string()));
+    }
+
+    #[test]
+    fn test_extract_host_git() {
+        assert_eq!(extract_host_from_url("git://github.com/repo.git"), Some("github.com".to_string()));
     }
 }
