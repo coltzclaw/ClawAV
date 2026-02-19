@@ -198,8 +198,9 @@ pub async fn run_watchdog(state: AppState, receivers: AlertReceivers) -> Result<
     if state.config.sentinel.enabled {
         let sentinel_config = state.config.sentinel.clone();
         let sentinel_tx = state.raw_tx.clone();
-        let barnacle_for_sentinel = barnacle::BarnacleEngine::load(
-            std::path::Path::new("/etc/clawtower/barnacle")
+        let barnacle_for_sentinel = barnacle::BarnacleEngine::load_verified(
+            &state.config.barnacle.vendor_dir,
+            Some(std::path::Path::new(&state.config.barnacle.ioc_pubkey_path)),
         ).ok().map(std::sync::Arc::new);
 
         tokio::spawn(async move {

@@ -645,8 +645,11 @@ impl Sentinel {
             return;
         }
 
-        // Log rotation check
-        if is_log_rotation(path) {
+        let policy = policy_for_path(&self.config, path);
+
+        // Log rotation check — but NEVER short-circuit for Protected files.
+        // An attacker can create SOUL.md.1 to trigger this, bypassing quarantine.
+        if policy != Some(WatchPolicy::Protected) && is_log_rotation(path) {
             self.alert(Severity::Info, "sentinel",
                 &format!("Log rotation detected: {}", path),
             ).await;
@@ -661,8 +664,6 @@ impl Sentinel {
             }
             return;
         }
-
-        let policy = policy_for_path(&self.config, path);
 
         // Read current and shadow
         let current = match std::fs::read_to_string(file_path) {
