@@ -113,6 +113,23 @@ fn severity_rank(s: &Severity) -> u8 {
     }
 }
 
+/// Normalize a file path: resolve `.`, `..`, collapse `//`, but don't touch the filesystem.
+fn normalize_path(path: &str) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    for component in path.split('/') {
+        match component {
+            "" | "." => continue,
+            ".." => { parts.pop(); }
+            other => parts.push(other),
+        }
+    }
+    if path.starts_with('/') {
+        format!("/{}", parts.join("/"))
+    } else {
+        parts.join("/")
+    }
+}
+
 impl PolicyEngine {
     /// Create an empty policy engine
     pub fn new() -> Self {
@@ -268,7 +285,7 @@ impl PolicyEngine {
         if !spec.command.is_empty() {
             if let Some(ref cmd) = event.command {
                 let binary = event.args.first()
-                    .map(|s| s.rsplit('/').next().unwrap_or(s))
+                    .map(|s| crate::util::extract_binary_name(s))
                     .unwrap_or("");
 
                 if spec.command.iter().any(|c| c.eq_ignore_ascii_case(binary)) {
@@ -317,8 +334,9 @@ impl PolicyEngine {
         // File access (glob match on file path)
         if !spec.file_access.is_empty() {
             if let Some(ref path) = event.file_path {
+                let normalized = normalize_path(path);
                 if spec.file_access.iter().any(|pattern| {
-                    glob_match::glob_match(pattern, path)
+                    glob_match::glob_match(pattern, &normalized)
                 }) {
                     return true;
                 }
@@ -326,11 +344,13 @@ impl PolicyEngine {
             // Also check args for file paths
             if event.command.is_some() {
                 for arg in &event.args {
-                    if arg.starts_with('/')
-                        && spec.file_access.iter().any(|pattern| {
-                            glob_match::glob_match(pattern, arg)
+                    if arg.starts_with('/') {
+                        let normalized = normalize_path(arg);
+                        if spec.file_access.iter().any(|pattern| {
+                            glob_match::glob_match(pattern, &normalized)
                         }) {
                             return true;
+                        }
                     }
                 }
             }
@@ -2141,5 +2161,74 @@ rules:
         let dir = tempfile::tempdir().unwrap();
         let engine = PolicyEngine::load(dir.path()).unwrap();
         assert!(engine.file_info().is_empty());
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // H3: Path normalization — dot-segment bypass prevention
+    // ═══════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_file_access_dot_segment_bypass_blocked() {
+        let yaml = r#"
+rules:
+  - name: "deny-shadow"
+    match:
+      file_access: ["/etc/shadow"]
+    action: critical
+"#;
+        let engine = load_from_str(yaml);
+        let event = make_syscall_event("openat", "/etc/./shadow");
+        assert!(engine.evaluate(&event).is_some(), "/etc/./shadow must match /etc/shadow rule");
+    }
+
+    #[test]
+    fn test_file_access_parent_traversal_blocked() {
+        let yaml = r#"
+rules:
+  - name: "deny-shadow"
+    match:
+      file_access: ["/etc/shadow"]
+    action: critical
+"#;
+        let engine = load_from_str(yaml);
+        let event = make_syscall_event("openat", "/etc/../etc/shadow");
+        assert!(engine.evaluate(&event).is_some(), "/etc/../etc/shadow must match");
+    }
+
+    #[test]
+    fn test_file_access_double_slash_blocked() {
+        let yaml = r#"
+rules:
+  - name: "deny-shadow"
+    match:
+      file_access: ["/etc/shadow"]
+    action: critical
+"#;
+        let engine = load_from_str(yaml);
+        let event = make_syscall_event("openat", "//etc/shadow");
+        assert!(engine.evaluate(&event).is_some(), "//etc/shadow must match");
+    }
+
+    #[test]
+    fn test_file_access_args_normalized() {
+        let yaml = r#"
+rules:
+  - name: "deny-shadow"
+    match:
+      file_access: ["/etc/shadow"]
+    action: critical
+"#;
+        let engine = load_from_str(yaml);
+        let event = make_exec_event(&["cat", "/etc/./shadow"]);
+        assert!(engine.evaluate(&event).is_some(), "Args with dot segments must be normalized");
+    }
+
+    #[test]
+    fn test_normalize_path_basic() {
+        assert_eq!(normalize_path("/etc/./shadow"), "/etc/shadow");
+        assert_eq!(normalize_path("/etc/../etc/shadow"), "/etc/shadow");
+        assert_eq!(normalize_path("//etc/shadow"), "/etc/shadow");
+        assert_eq!(normalize_path("/a/b/c"), "/a/b/c");
+        assert_eq!(normalize_path("/"), "/");
     }
 }
