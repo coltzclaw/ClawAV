@@ -6,19 +6,66 @@
 #   curl -sSL https://raw.githubusercontent.com/ClawTower/ClawTower/main/scripts/oneshot-install.sh | sudo bash -s -- --version v0.3.1b
 #   curl -sSL https://raw.githubusercontent.com/ClawTower/ClawTower/main/scripts/oneshot-install.sh | sudo bash -s -- --update
 #
+# Non-interactive (for OpenClaw / CI / automation):
+#   curl -sSL .../oneshot-install.sh | sudo bash -s -- --non-interactive --admin-user jr
+#   curl -sSL .../oneshot-install.sh | sudo bash -s -- --non-interactive \
+#     --watch-uid 1000 --admin-user jr --slack-url https://hooks.slack.com/... \
+#     --enable-api --enable-barnacle
+#
+# Non-interactive flags:
+#   --non-interactive    Skip all prompts (use defaults + flags below)
+#   --watch-uid UID      UID to monitor (default: caller's UID)
+#   --extra-uids UIDS    Comma-separated additional UIDs
+#   --slack-url URL      Slack webhook URL (omit to disable)
+#   --slack-channel CH   Slack channel name
+#   --slack-backup URL   Backup Slack webhook URL
+#   --admin-user USER    Human admin username (required if no existing admin)
+#   --enable-api         Enable JSON API (default)
+#   --no-api             Disable JSON API
+#   --enable-barnacle    Enable BarnacleDefense (default)
+#   --no-barnacle        Disable BarnacleDefense
+#   --mode MODE          Force mode: upgrade, install, reinstall
+#
+# Environment variables (non-interactive):
+#   CLAWTOWER_ADMIN_PASSWORD   Set admin account password (optional, prefer SSH keys)
+#
 set -euo pipefail
 
 REPO="ClawTower/ClawTower"
 VERSION="latest"
 MODE="install"
 
+# Non-interactive mode flags (for OpenClaw / CI / automation)
+NONINTERACTIVE=false
+NI_WATCH_UID=""
+NI_EXTRA_UIDS=""
+NI_SLACK_URL=""
+NI_SLACK_CHANNEL=""
+NI_SLACK_BACKUP=""
+NI_ADMIN_USER=""
+NI_API=true
+NI_BARNACLE=true
+NI_MODE=""
+
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --update)   MODE="update"; shift ;;
-        --version)  VERSION="$2"; shift 2 ;;
-        -*)         echo "Unknown flag: $1" >&2; exit 1 ;;
-        *)          VERSION="$1"; shift ;;
+        --update)          MODE="update"; shift ;;
+        --version)         VERSION="$2"; shift 2 ;;
+        --non-interactive) NONINTERACTIVE=true; shift ;;
+        --watch-uid)       NI_WATCH_UID="$2"; shift 2 ;;
+        --extra-uids)      NI_EXTRA_UIDS="$2"; shift 2 ;;
+        --slack-url)       NI_SLACK_URL="$2"; shift 2 ;;
+        --slack-channel)   NI_SLACK_CHANNEL="$2"; shift 2 ;;
+        --slack-backup)    NI_SLACK_BACKUP="$2"; shift 2 ;;
+        --admin-user)      NI_ADMIN_USER="$2"; shift 2 ;;
+        --enable-api)      NI_API=true; shift ;;
+        --no-api)          NI_API=false; shift ;;
+        --enable-barnacle) NI_BARNACLE=true; shift ;;
+        --no-barnacle)     NI_BARNACLE=false; shift ;;
+        --mode)            NI_MODE="$2"; shift 2 ;;
+        -*)                echo "Unknown flag: $1" >&2; exit 1 ;;
+        *)                 VERSION="$1"; shift ;;
     esac
 done
 
@@ -124,6 +171,10 @@ sep() {
 
 confirm() {
     local prompt="$1"
+    if [[ "$NONINTERACTIVE" == true ]]; then
+        log "(auto) $prompt → yes"
+        return 0
+    fi
     local response
     while true; do
         echo -en "  ${AMBER}▸${NC} ${prompt} " > /dev/tty
@@ -137,6 +188,7 @@ confirm() {
 }
 
 wait_for_enter() {
+    if [[ "$NONINTERACTIVE" == true ]]; then return 0; fi
     echo -en "  ${AMBER}▸${NC} $1" > /dev/tty
     read -r < /dev/tty
 }
@@ -215,22 +267,33 @@ POLICYEOF
 # INTERACTIVE INSTALL DETECTION MENU
 # ═══════════════════════════════════════════════════════════════════════════════
 if [[ "$EXISTING_INSTALL" == "true" && "$MODE" == "install" ]]; then
-    CURRENT_VERSION=$(/usr/local/bin/clawtower --version 2>/dev/null || echo "unknown")
-    header "ClawTower is already installed" "Current version: $CURRENT_VERSION"
-    echo -e "  ${BOLD}1${NC}  ${DIM}Upgrade${NC}         swap binaries, keep config & key"
-    echo -e "  ${BOLD}2${NC}  ${DIM}Reconfigure${NC}     re-run config wizard, keep key"
-    echo -e "  ${BOLD}3${NC}  ${DIM}Full reinstall${NC}  nuke everything, start fresh"
-    echo -e "  ${BOLD}4${NC}  ${DIM}Abort${NC}"
-    echo ""
-    echo -en "  ${AMBER}▸${NC} Choose [1-4]: " > /dev/tty
-    read -r menu_choice < /dev/tty
-    case "$menu_choice" in
-        1) MODE="upgrade" ;;
-        2) MODE="install" ;;  # Continue to full flow (reconfigure)
-        3) MODE="install"; HAD_ADMIN_KEY=false ;;  # Full reinstall — treat as fresh
-        4) echo "Aborted."; exit 0 ;;
-        *) die "Invalid choice" ;;
-    esac
+    if [[ "$NONINTERACTIVE" == true ]]; then
+        # Non-interactive: use --mode flag or default to upgrade
+        case "${NI_MODE:-upgrade}" in
+            upgrade)   MODE="upgrade" ;;
+            install)   MODE="install" ;;
+            reinstall) MODE="install"; HAD_ADMIN_KEY=false ;;
+            *)         die "Invalid --mode: $NI_MODE (expected: upgrade, install, reinstall)" ;;
+        esac
+        log "(auto) Existing install detected → mode=$MODE"
+    else
+        CURRENT_VERSION=$(/usr/local/bin/clawtower --version 2>/dev/null || echo "unknown")
+        header "ClawTower is already installed" "Current version: $CURRENT_VERSION"
+        echo -e "  ${BOLD}1${NC}  ${DIM}Upgrade${NC}         swap binaries, keep config & key"
+        echo -e "  ${BOLD}2${NC}  ${DIM}Reconfigure${NC}     re-run config wizard, keep key"
+        echo -e "  ${BOLD}3${NC}  ${DIM}Full reinstall${NC}  nuke everything, start fresh"
+        echo -e "  ${BOLD}4${NC}  ${DIM}Abort${NC}"
+        echo ""
+        echo -en "  ${AMBER}▸${NC} Choose [1-4]: " > /dev/tty
+        read -r menu_choice < /dev/tty
+        case "$menu_choice" in
+            1) MODE="upgrade" ;;
+            2) MODE="install" ;;  # Continue to full flow (reconfigure)
+            3) MODE="install"; HAD_ADMIN_KEY=false ;;  # Full reinstall — treat as fresh
+            4) echo "Aborted."; exit 0 ;;
+            *) die "Invalid choice" ;;
+        esac
+    fi
 elif [[ "$EXISTING_INSTALL" == "partial" && "$MODE" == "install" ]]; then
     echo ""
     warn "Partial ClawTower installation detected (some files missing)."
@@ -682,21 +745,30 @@ CONF="/etc/clawtower/config.toml"
 # ── Watched User ──────────────────────────────────────────────────────────────
 CALLING_USER="${SUDO_USER:-$(whoami)}"
 CALLING_UID=$(id -u "$CALLING_USER" 2>/dev/null || echo "1000")
-echo -e "  ${BOLD}User to monitor:${NC} $CALLING_USER ${DIM}(UID $CALLING_UID)${NC}"
-echo -en "  ${AMBER}▸${NC} Monitor this user? [Y/n] or enter a different UID: " > /dev/tty
-read -r user_input < /dev/tty
-if [[ -z "$user_input" || "$user_input" =~ ^[yY] ]]; then
-    WATCH_UID="$CALLING_UID"
+if [[ "$NONINTERACTIVE" == true ]]; then
+    WATCH_UID="${NI_WATCH_UID:-$CALLING_UID}"
+    log "(auto) Watching UID: $WATCH_UID"
 else
-    WATCH_UID="$user_input"
+    echo -e "  ${BOLD}User to monitor:${NC} $CALLING_USER ${DIM}(UID $CALLING_UID)${NC}"
+    echo -en "  ${AMBER}▸${NC} Monitor this user? [Y/n] or enter a different UID: " > /dev/tty
+    read -r user_input < /dev/tty
+    if [[ -z "$user_input" || "$user_input" =~ ^[yY] ]]; then
+        WATCH_UID="$CALLING_UID"
+    else
+        WATCH_UID="$user_input"
+    fi
 fi
 sed -i "s/^watched_user = .*/watched_user = \"$WATCH_UID\"/" "$CONF"
 log "Watching UID: $WATCH_UID"
 
 # ── Additional Users ──────────────────────────────────────────────────────────
-echo ""
-echo -en "  ${AMBER}▸${NC} Monitor additional UIDs? ${DIM}(comma-separated, or ENTER to skip)${NC}: " > /dev/tty
-read -r extra_uids < /dev/tty
+if [[ "$NONINTERACTIVE" == true ]]; then
+    extra_uids="$NI_EXTRA_UIDS"
+else
+    echo ""
+    echo -en "  ${AMBER}▸${NC} Monitor additional UIDs? ${DIM}(comma-separated, or ENTER to skip)${NC}: " > /dev/tty
+    read -r extra_uids < /dev/tty
+fi
 if [[ -n "$extra_uids" ]]; then
     # Build TOML array like ["1000", "1001"]
     UIDS_TOML="[\"$WATCH_UID\""
@@ -711,55 +783,82 @@ if [[ -n "$extra_uids" ]]; then
 fi
 
 # ── Slack (Optional) ─────────────────────────────────────────────────────────
-sep
-echo ""
-echo -e "  ${BOLD}Slack Alerts${NC} ${DIM}(optional)${NC}"
-echo -e "  ${DIM}ClawTower can send alerts to an independent Slack webhook.${NC}"
-echo -en "  ${AMBER}▸${NC} Slack webhook URL ${DIM}(or ENTER to skip)${NC}: " > /dev/tty
-read -r slack_url < /dev/tty
+if [[ "$NONINTERACTIVE" == true ]]; then
+    slack_url="$NI_SLACK_URL"
+    slack_chan="$NI_SLACK_CHANNEL"
+    slack_backup="$NI_SLACK_BACKUP"
+else
+    sep
+    echo ""
+    echo -e "  ${BOLD}Slack Alerts${NC} ${DIM}(optional)${NC}"
+    echo -e "  ${DIM}ClawTower can send alerts to an independent Slack webhook.${NC}"
+    echo -en "  ${AMBER}▸${NC} Slack webhook URL ${DIM}(or ENTER to skip)${NC}: " > /dev/tty
+    read -r slack_url < /dev/tty
+    slack_chan=""
+    slack_backup=""
+    if [[ -n "$slack_url" ]]; then
+        echo -en "  ${AMBER}▸${NC} Slack channel ${DIM}(default: #devops)${NC}: " > /dev/tty
+        read -r slack_chan < /dev/tty
+        echo -en "  ${AMBER}▸${NC} Backup webhook URL ${DIM}(or ENTER to skip)${NC}: " > /dev/tty
+        read -r slack_backup < /dev/tty
+    fi
+fi
 if [[ -n "$slack_url" ]]; then
     sed -i "s|^webhook_url = .*|webhook_url = \"$slack_url\"|" "$CONF"
-    sed -i "s/^enabled = false/enabled = true/" "$CONF"  # enable slack section
+    sed -i "s/^enabled = false/enabled = true/" "$CONF"
     log "Slack alerts enabled"
-
-    echo -en "  ${AMBER}▸${NC} Slack channel ${DIM}(default: #devops)${NC}: " > /dev/tty
-    read -r slack_chan < /dev/tty
     [[ -n "$slack_chan" ]] && sed -i "s|^channel = .*|channel = \"$slack_chan\"|" "$CONF"
-
-    echo -en "  ${AMBER}▸${NC} Backup webhook URL ${DIM}(or ENTER to skip)${NC}: " > /dev/tty
-    read -r slack_backup < /dev/tty
     [[ -n "$slack_backup" ]] && sed -i "s|^backup_webhook_url = .*|backup_webhook_url = \"$slack_backup\"|" "$CONF"
 else
     log "Slack alerts skipped — alerts go to logs only"
 fi
 
 # ── API ───────────────────────────────────────────────────────────────────────
-sep
-echo ""
-echo -e "  ${BOLD}JSON API${NC} ${DIM}(LAN-only status/alerts endpoint)${NC}"
-echo -en "  ${AMBER}▸${NC} Enable API on port 18791? [Y/n]: " > /dev/tty
-read -r api_input < /dev/tty
-if [[ "$api_input" =~ ^[nN] ]]; then
-    sed -i '/^\[api\]/,/^$/s/^enabled = true/enabled = false/' "$CONF"
-    log "API disabled"
+if [[ "$NONINTERACTIVE" == true ]]; then
+    if [[ "$NI_API" == true ]]; then
+        sed -i '/^\[api\]/,/^$/s/^bind = .*/bind = "127.0.0.1"/' "$CONF"
+        log "(auto) API enabled on 127.0.0.1:18791"
+    else
+        sed -i '/^\[api\]/,/^$/s/^enabled = true/enabled = false/' "$CONF"
+        log "(auto) API disabled"
+    fi
 else
-    # Ensure API binds to localhost by default (non-loopback requires auth_token)
-    sed -i '/^\[api\]/,/^$/s/^bind = .*/bind = "127.0.0.1"/' "$CONF"
-    log "API enabled on 127.0.0.1:18791"
+    sep
+    echo ""
+    echo -e "  ${BOLD}JSON API${NC} ${DIM}(LAN-only status/alerts endpoint)${NC}"
+    echo -en "  ${AMBER}▸${NC} Enable API on port 18791? [Y/n]: " > /dev/tty
+    read -r api_input < /dev/tty
+    if [[ "$api_input" =~ ^[nN] ]]; then
+        sed -i '/^\[api\]/,/^$/s/^enabled = true/enabled = false/' "$CONF"
+        log "API disabled"
+    else
+        sed -i '/^\[api\]/,/^$/s/^bind = .*/bind = "127.0.0.1"/' "$CONF"
+        log "API enabled on 127.0.0.1:18791"
+    fi
 fi
 
 # ── BarnacleDefense ───────────────────────────────────────────────────────────
-sep
-echo ""
-echo -e "  ${BOLD}BarnacleDefense${NC} ${DIM}(prompt injection + supply chain detection)${NC}"
-echo -en "  ${AMBER}▸${NC} Enable BarnacleDefense? [Y/n]: " > /dev/tty
-read -r sc_input < /dev/tty
-if [[ "$sc_input" =~ ^[nN] ]]; then
-    log "BarnacleDefense disabled"
+if [[ "$NONINTERACTIVE" == true ]]; then
+    if [[ "$NI_BARNACLE" == true ]]; then
+        sed -i '/^\[barnacle\]/,/^$/s/^enabled = false/enabled = true/' "$CONF"
+        sed -i "s|^vendor_dir = .*|vendor_dir = \"/etc/clawtower/barnacle\"|" "$CONF"
+        log "(auto) BarnacleDefense enabled"
+    else
+        log "(auto) BarnacleDefense disabled"
+    fi
 else
-    sed -i '/^\[barnacle\]/,/^$/s/^enabled = false/enabled = true/' "$CONF"
-    sed -i "s|^vendor_dir = .*|vendor_dir = \"/etc/clawtower/barnacle\"|" "$CONF"
-    log "BarnacleDefense enabled"
+    sep
+    echo ""
+    echo -e "  ${BOLD}BarnacleDefense${NC} ${DIM}(prompt injection + supply chain detection)${NC}"
+    echo -en "  ${AMBER}▸${NC} Enable BarnacleDefense? [Y/n]: " > /dev/tty
+    read -r sc_input < /dev/tty
+    if [[ "$sc_input" =~ ^[nN] ]]; then
+        log "BarnacleDefense disabled"
+    else
+        sed -i '/^\[barnacle\]/,/^$/s/^enabled = false/enabled = true/' "$CONF"
+        sed -i "s|^vendor_dir = .*|vendor_dir = \"/etc/clawtower/barnacle\"|" "$CONF"
+        log "BarnacleDefense enabled"
+    fi
 fi
 
 # ── Summary ───────────────────────────────────────────────────────────────────
@@ -826,30 +925,48 @@ done
 # Deduplicate
 EXISTING_ADMINS=($(printf '%s\n' "${EXISTING_ADMINS[@]}" | sort -u))
 
-if [[ ${#EXISTING_ADMINS[@]} -gt 0 ]]; then
-    echo -e "  ${GREEN}✓ Found existing admin account(s): ${BOLD}${EXISTING_ADMINS[*]}${NC}"
-    echo ""
-    echo -en "  ${AMBER}▸${NC} Use existing admin account(s)? [Y/n]: ${NC}" > /dev/tty
-    read -r use_existing < /dev/tty
-    if [[ ! "$use_existing" =~ ^[nN] ]]; then
-        log "Using existing admin account(s): ${EXISTING_ADMINS[*]}"
-        ADMIN_USERNAME="${EXISTING_ADMINS[0]}"
+if [[ "$NONINTERACTIVE" == true ]]; then
+    # Non-interactive admin account handling
+    if [[ ${#EXISTING_ADMINS[@]} -gt 0 ]]; then
+        ADMIN_USERNAME="${NI_ADMIN_USER:-${EXISTING_ADMINS[0]}}"
+        log "(auto) Using existing admin account: $ADMIN_USERNAME"
         create_admin="n"
+    elif [[ -n "$NI_ADMIN_USER" ]]; then
+        ADMIN_USERNAME="$NI_ADMIN_USER"
+        create_admin="y"
     else
-        echo -en "  ${AMBER}▸${NC} Create an additional admin account? [Y/n]: ${NC}" > /dev/tty
-        read -r create_admin < /dev/tty
+        die "Non-interactive mode requires --admin-user when no existing admin accounts found"
     fi
 else
-    # No admin accounts detected — one is required, ask for the username directly
-    echo -en "  ${AMBER}▸${NC} Username for new admin account: ${NC}" > /dev/tty
-    read -r ADMIN_USERNAME < /dev/tty
-    [[ -n "$ADMIN_USERNAME" ]] || die "A human admin account is required. Re-run the installer and provide a username."
-    create_admin="y"
+    if [[ ${#EXISTING_ADMINS[@]} -gt 0 ]]; then
+        echo -e "  ${GREEN}✓ Found existing admin account(s): ${BOLD}${EXISTING_ADMINS[*]}${NC}"
+        echo ""
+        echo -en "  ${AMBER}▸${NC} Use existing admin account(s)? [Y/n]: ${NC}" > /dev/tty
+        read -r use_existing < /dev/tty
+        if [[ ! "$use_existing" =~ ^[nN] ]]; then
+            log "Using existing admin account(s): ${EXISTING_ADMINS[*]}"
+            ADMIN_USERNAME="${EXISTING_ADMINS[0]}"
+            create_admin="n"
+        else
+            echo -en "  ${AMBER}▸${NC} Create an additional admin account? [Y/n]: ${NC}" > /dev/tty
+            read -r create_admin < /dev/tty
+        fi
+    else
+        # No admin accounts detected — one is required, ask for the username directly
+        echo -en "  ${AMBER}▸${NC} Username for new admin account: ${NC}" > /dev/tty
+        read -r ADMIN_USERNAME < /dev/tty
+        [[ -n "$ADMIN_USERNAME" ]] || die "A human admin account is required. Re-run the installer and provide a username."
+        create_admin="y"
+    fi
 fi
 
 if [[ ! "$create_admin" =~ ^[nN] && -z "$ADMIN_USERNAME" ]]; then
-    echo -en "  ${AMBER}▸${NC} Username for admin account: ${NC}" > /dev/tty
-    read -r ADMIN_USERNAME < /dev/tty
+    if [[ "$NONINTERACTIVE" == true ]]; then
+        ADMIN_USERNAME="$NI_ADMIN_USER"
+    else
+        echo -en "  ${AMBER}▸${NC} Username for admin account: ${NC}" > /dev/tty
+        read -r ADMIN_USERNAME < /dev/tty
+    fi
     [[ -n "$ADMIN_USERNAME" ]] || { warn "No username provided — skipping admin account"; ADMIN_USERNAME=""; }
 
     if [[ -n "$ADMIN_USERNAME" ]]; then
@@ -861,10 +978,19 @@ if [[ ! "$create_admin" =~ ^[nN] && -z "$ADMIN_USERNAME" ]]; then
             useradd -m -s /bin/bash -G sudo "$ADMIN_USERNAME"
         fi
 
-        # Set password
-        echo ""
-        echo -e "  ${BOLD}Set a password for '${ADMIN_USERNAME}':${NC}" > /dev/tty
-        passwd "$ADMIN_USERNAME" < /dev/tty
+        # Set password (skip in non-interactive — use SSH keys or set later)
+        if [[ "$NONINTERACTIVE" == true ]]; then
+            if [[ -n "${CLAWTOWER_ADMIN_PASSWORD:-}" ]]; then
+                echo "$ADMIN_USERNAME:$CLAWTOWER_ADMIN_PASSWORD" | chpasswd
+                log "(auto) Admin password set via CLAWTOWER_ADMIN_PASSWORD env var"
+            else
+                warn "No password set for '$ADMIN_USERNAME' — use SSH keys or set one manually"
+            fi
+        else
+            echo ""
+            echo -e "  ${BOLD}Set a password for '${ADMIN_USERNAME}':${NC}" > /dev/tty
+            passwd "$ADMIN_USERNAME" < /dev/tty
+        fi
 
         # Give full NOPASSWD sudo
         cat > "/etc/sudoers.d/$ADMIN_USERNAME" << SUDOEOF
@@ -885,14 +1011,16 @@ SUDOEOF
 
         echo ""
         log "Admin account '${BOLD}$ADMIN_USERNAME${NC}' created with full sudo access"
-        echo ""
-        echo -e "  ${DIM}Use this account for all system administration.${NC}"
-        echo -e "  ${DIM}SSH in as:${NC} ssh ${BOLD}${ADMIN_USERNAME}${NC}@$(hostname)"
-        echo ""
-        echo -e "  ${RED}┃${NC} ${RED}${BOLD}Never share '${ADMIN_USERNAME}' credentials with your AI agent.${NC}"
-        echo -e "  ${RED}┃${NC} ${DIM}The agent cannot know this password or SSH key.${NC}"
-        echo -e "  ${RED}┃${NC} ${DIM}This is the foundation of ClawTower's security model.${NC}"
-        echo ""
+        if [[ "$NONINTERACTIVE" != true ]]; then
+            echo ""
+            echo -e "  ${DIM}Use this account for all system administration.${NC}"
+            echo -e "  ${DIM}SSH in as:${NC} ssh ${BOLD}${ADMIN_USERNAME}${NC}@$(hostname)"
+            echo ""
+            echo -e "  ${RED}┃${NC} ${RED}${BOLD}Never share '${ADMIN_USERNAME}' credentials with your AI agent.${NC}"
+            echo -e "  ${RED}┃${NC} ${DIM}The agent cannot know this password or SSH key.${NC}"
+            echo -e "  ${RED}┃${NC} ${DIM}This is the foundation of ClawTower's security model.${NC}"
+            echo ""
+        fi
     fi
 fi
 
@@ -1020,15 +1148,21 @@ else
         sep
     fi
 
-    echo ""
-    while true; do
-        echo -en "  ${RED}▸${NC} Type '${BOLD}I SAVED MY KEY${NC}' to confirm: " > /dev/tty
-        read -r response < /dev/tty
-        if [[ "$response" == "I SAVED MY KEY" ]]; then
-            break
-        fi
-        echo -e "    ${DIM}You must type exactly: I SAVED MY KEY${NC}" > /dev/tty
-    done
+    if [[ "$NONINTERACTIVE" == true ]]; then
+        echo ""
+        warn "Non-interactive mode — save the admin key shown above before it scrolls away!"
+        echo ""
+    else
+        echo ""
+        while true; do
+            echo -en "  ${RED}▸${NC} Type '${BOLD}I SAVED MY KEY${NC}' to confirm: " > /dev/tty
+            read -r response < /dev/tty
+            if [[ "$response" == "I SAVED MY KEY" ]]; then
+                break
+            fi
+            echo -e "    ${DIM}You must type exactly: I SAVED MY KEY${NC}" > /dev/tty
+        done
+    fi
 fi
 
 header "ClawTower $VERSION installed and locked down"
