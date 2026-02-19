@@ -661,7 +661,7 @@ impl BarnacleEngine {
 
                     // Skip sudo alerts for known-safe commands
                     if matched.as_str().starts_with("sudo")
-                        && Self::SUDO_ALLOWLIST.iter().any(|allowed| cmd_lower.contains(allowed))
+                        && is_sudo_allowlisted(&cmd_lower)
                     {
                         continue;
                     }
@@ -1061,6 +1061,44 @@ pub fn run_update_ioc(args: &[String]) -> Result<()> {
         std::process::exit(1);
     }
     Ok(())
+}
+
+/// Check if a sudo command is in the allowlist using token-aware matching.
+/// Returns true if the command is considered safe, false if it should be flagged.
+fn is_sudo_allowlisted(cmd: &str) -> bool {
+    let cmd_lower = cmd.to_lowercase();
+    let tokens: Vec<&str> = cmd_lower.split_whitespace().collect();
+
+    for allowed in BarnacleEngine::SUDO_ALLOWLIST {
+        let allowed_tokens: Vec<&str> = allowed.split_whitespace().collect();
+        if tokens.len() >= allowed_tokens.len()
+            && tokens[..allowed_tokens.len()]
+                .iter()
+                .zip(allowed_tokens.iter())
+                .all(|(a, b)| a == b)
+        {
+            // Token prefix matches — but check for dangerous flags
+            let dangerous_flags = [
+                "-exec",
+                "-execdir",
+                "--to-command",
+                "--checkpoint-action",
+                ".system",
+                "| sh",
+                "| bash",
+                "| /bin/sh",
+                "| /bin/bash",
+                "-i /etc/",
+                "`",
+                "$(",
+            ];
+            if dangerous_flags.iter().any(|f| cmd_lower.contains(f)) {
+                return false; // Contains dangerous flag — not safe
+            }
+            return true;
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -1730,5 +1768,38 @@ mod tests {
         let sci = info.iter().find(|i| i.filename == "supply-chain-ioc.json").unwrap();
         assert_eq!(sci.version, Some("2.0.0".to_string()));
         assert_eq!(sci.sha256.len(), 64);
+    }
+
+    #[test]
+    fn test_sudo_find_exec_not_allowlisted() {
+        // "sudo find / -exec rm -rf {} \\;" must NOT be suppressed by "sudo find" allowlist
+        let dangerous_cmds = vec![
+            "sudo find / -exec rm -rf {} \\;",
+            "sudo find /tmp -exec /bin/sh -c 'cat /etc/shadow' \\;",
+            "sudo grep -r password /etc/ --to-command='sh -c id'",
+            "sudo tar --checkpoint-action=exec=sh payload.tar",
+        ];
+        for cmd in dangerous_cmds {
+            assert!(
+                !is_sudo_allowlisted(cmd),
+                "Dangerous command should NOT be allowlisted: {}", cmd
+            );
+        }
+    }
+
+    #[test]
+    fn test_safe_sudo_still_allowlisted() {
+        let safe_cmds = vec![
+            "sudo find /var/log -name '*.log'",
+            "sudo grep error /var/log/syslog",
+            "sudo cp /tmp/file /home/user/",
+            "sudo systemctl status nginx",
+        ];
+        for cmd in safe_cmds {
+            assert!(
+                is_sudo_allowlisted(cmd),
+                "Safe command should be allowlisted: {}", cmd
+            );
+        }
     }
 }
