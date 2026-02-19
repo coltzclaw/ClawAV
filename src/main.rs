@@ -78,6 +78,7 @@ mod slack;
 mod tui;
 mod response;
 mod update;
+mod util;
 
 #[cfg(test)]
 mod integration_tests;
@@ -998,6 +999,7 @@ async fn async_main() -> Result<()> {
             store: alert_store.clone(),
             start_time: std::time::Instant::now(),
             auth_token: config.api.auth_token.clone(),
+            cors_origin: config.api.cors_origin.clone(),
             pending_store: pending_store.clone(),
             response_tx: response_tx.clone().map(std::sync::Arc::new),
             scan_results: Some(scan_store.clone()),

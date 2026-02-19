@@ -141,11 +141,12 @@ struct ErrorResponse {
     error: String,
 }
 
-fn json_response(status: StatusCode, body: String) -> Response<Body> {
+fn json_response(status: StatusCode, body: String, cors_origin: Option<&str>) -> Response<Body> {
+    let origin = cors_origin.unwrap_or("*");
     Response::builder()
         .status(status)
         .header("Content-Type", "application/json")
-        .header("Access-Control-Allow-Origin", "*")
+        .header("Access-Control-Allow-Origin", origin)
         .body(Body::from(body))
         .unwrap()
 }
@@ -155,6 +156,7 @@ pub struct ApiContext {
     pub store: SharedAlertStore,
     pub start_time: Instant,
     pub auth_token: String,
+    pub cors_origin: Option<String>,
     pub pending_store: SharedPendingActions,
     pub response_tx: Option<Arc<mpsc::Sender<ResponseRequest>>>,
     // Evidence bundle fields (all optional for backward compat)
@@ -267,7 +269,7 @@ async fn handle(
                     alerts_suppressed: parity.alerts_suppressed,
                 },
             };
-            json_response(StatusCode::OK, serde_json::to_string(&resp).unwrap())
+            json_response(StatusCode::OK, serde_json::to_string(&resp).unwrap(), ctx.cors_origin.as_deref())
         }
         "/api/alerts" => {
             let store = ctx.store.lock().await;
@@ -281,7 +283,7 @@ async fn handle(
                     message: a.message.clone(),
                 })
                 .collect();
-            json_response(StatusCode::OK, serde_json::to_string(&alerts).unwrap())
+            json_response(StatusCode::OK, serde_json::to_string(&alerts).unwrap(), ctx.cors_origin.as_deref())
         }
         "/api/health" => {
             let store = ctx.store.lock().await;
@@ -294,7 +296,7 @@ async fn handle(
                 "version": env!("CARGO_PKG_VERSION"),
                 "last_alert_age_seconds": last_alert_age,
             });
-            json_response(StatusCode::OK, serde_json::to_string(&resp).unwrap())
+            json_response(StatusCode::OK, serde_json::to_string(&resp).unwrap(), ctx.cors_origin.as_deref())
         }
         "/api/security" => {
             let store = ctx.store.lock().await;
@@ -315,7 +317,7 @@ async fn handle(
                     alerts_suppressed: parity.alerts_suppressed,
                 },
             };
-            json_response(StatusCode::OK, serde_json::to_string(&resp).unwrap())
+            json_response(StatusCode::OK, serde_json::to_string(&resp).unwrap(), ctx.cors_origin.as_deref())
         }
         "/api/pending" => {
             let pending = ctx.pending_store.lock().await;
@@ -332,11 +334,11 @@ async fn handle(
                     "age_seconds": a.created_at.elapsed().as_secs(),
                 })
             }).collect();
-            json_response(StatusCode::OK, serde_json::to_string(&items).unwrap())
+            json_response(StatusCode::OK, serde_json::to_string(&items).unwrap(), ctx.cors_origin.as_deref())
         }
         path if path.starts_with("/api/pending/") && (path.ends_with("/approve") || path.ends_with("/deny")) => {
             if req.method() != &hyper::Method::POST {
-                json_response(StatusCode::METHOD_NOT_ALLOWED, r#"{"error":"POST required"}"#.to_string())
+                json_response(StatusCode::METHOD_NOT_ALLOWED, r#"{"error":"POST required"}"#.to_string(), ctx.cors_origin.as_deref())
             } else if let Some(ref resp_tx) = ctx.response_tx {
                 let parts: Vec<&str> = path.split('/').collect();
                 if parts.len() == 5 {
@@ -356,14 +358,14 @@ async fn handle(
                         surface: "api".to_string(),
                     };
                     match resp_tx.send(resolve).await {
-                        Ok(_) => json_response(StatusCode::OK, format!(r#"{{"id":"{}","result":"{}"}}"#, id, if approved { "approved" } else { "denied" })),
-                        Err(_) => json_response(StatusCode::INTERNAL_SERVER_ERROR, r#"{"error":"response engine unavailable"}"#.to_string()),
+                        Ok(_) => json_response(StatusCode::OK, format!(r#"{{"id":"{}","result":"{}"}}"#, id, if approved { "approved" } else { "denied" }), ctx.cors_origin.as_deref()),
+                        Err(_) => json_response(StatusCode::INTERNAL_SERVER_ERROR, r#"{"error":"response engine unavailable"}"#.to_string(), ctx.cors_origin.as_deref()),
                     }
                 } else {
-                    json_response(StatusCode::BAD_REQUEST, r#"{"error":"invalid path"}"#.to_string())
+                    json_response(StatusCode::BAD_REQUEST, r#"{"error":"invalid path"}"#.to_string(), ctx.cors_origin.as_deref())
                 }
             } else {
-                json_response(StatusCode::SERVICE_UNAVAILABLE, r#"{"error":"response engine not enabled"}"#.to_string())
+                json_response(StatusCode::SERVICE_UNAVAILABLE, r#"{"error":"response engine not enabled"}"#.to_string(), ctx.cors_origin.as_deref())
             }
         }
         path if path.starts_with("/api/evidence") => {
@@ -459,13 +461,13 @@ async fn handle(
                 policy_versions,
             };
 
-            json_response(StatusCode::OK, serde_json::to_string(&bundle).unwrap())
+            json_response(StatusCode::OK, serde_json::to_string(&bundle).unwrap(), ctx.cors_origin.as_deref())
         }
         _ => {
             let err = ErrorResponse {
                 error: "not found".to_string(),
             };
-            json_response(StatusCode::NOT_FOUND, serde_json::to_string(&err).unwrap())
+            json_response(StatusCode::NOT_FOUND, serde_json::to_string(&err).unwrap(), ctx.cors_origin.as_deref())
         }
     };
     Ok(resp)
@@ -487,6 +489,7 @@ pub async fn run_api_server(
         store,
         start_time: Instant::now(),
         auth_token,
+        cors_origin: None,
         pending_store,
         response_tx: response_tx.map(Arc::new),
         scan_results: None,
@@ -533,6 +536,7 @@ mod tests {
             store: new_shared_store(100),
             start_time: Instant::now(),
             auth_token: auth_token.to_string(),
+            cors_origin: None,
             pending_store: Arc::new(Mutex::new(Vec::new())),
             response_tx: None,
             scan_results: None,
@@ -548,6 +552,7 @@ mod tests {
             store,
             start_time: Instant::now(),
             auth_token: auth_token.to_string(),
+            cors_origin: None,
             pending_store: Arc::new(Mutex::new(Vec::new())),
             response_tx: None,
             scan_results: None,
@@ -747,5 +752,35 @@ mod tests {
             .unwrap();
         let resp = handle(req, ctx).await.unwrap();
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_cors_header_not_wildcard_when_configured() {
+        let ctx = Arc::new(ApiContext {
+            store: new_shared_store(100),
+            start_time: Instant::now(),
+            auth_token: String::new(),
+            cors_origin: Some("https://dashboard.example.com".to_string()),
+            pending_store: Arc::new(Mutex::new(Vec::new())),
+            response_tx: None,
+            scan_results: None,
+            audit_chain_path: None,
+            policy_dir: None,
+            barnacle_dir: None,
+            active_profile: None,
+        });
+        let req = Request::builder().uri("/api/health").body(Body::empty()).unwrap();
+        let resp = handle(req, ctx).await.unwrap();
+        let cors = resp.headers().get("Access-Control-Allow-Origin").unwrap().to_str().unwrap();
+        assert_eq!(cors, "https://dashboard.example.com");
+    }
+
+    #[tokio::test]
+    async fn test_cors_header_wildcard_by_default() {
+        let ctx = test_ctx("");
+        let req = Request::builder().uri("/api/health").body(Body::empty()).unwrap();
+        let resp = handle(req, ctx).await.unwrap();
+        let cors = resp.headers().get("Access-Control-Allow-Origin").unwrap().to_str().unwrap();
+        assert_eq!(cors, "*");
     }
 }

@@ -318,6 +318,8 @@ pub struct ApiConfig {
     pub port: u16,
     #[serde(default)]
     pub auth_token: String,
+    #[serde(default)]
+    pub cors_origin: Option<String>,
 }
 
 impl Default for ApiConfig {
@@ -327,6 +329,7 @@ impl Default for ApiConfig {
             bind: "127.0.0.1".to_string(),
             port: 18791,
             auth_token: String::new(),
+            cors_origin: None,
         }
     }
 }
@@ -1970,6 +1973,7 @@ interval = 3600
             bind: "0.0.0.0".to_string(),
             port: 18791,
             auth_token: String::new(),
+            cors_origin: None,
         };
         assert!(config.validate().is_err(), "Non-loopback bind must require auth_token");
     }
@@ -1981,6 +1985,7 @@ interval = 3600
             bind: "127.0.0.1".to_string(),
             port: 18791,
             auth_token: String::new(),
+            cors_origin: None,
         };
         assert!(config.validate().is_ok());
     }
@@ -1992,6 +1997,7 @@ interval = 3600
             bind: "0.0.0.0".to_string(),
             port: 18791,
             auth_token: "my-secret".to_string(),
+            cors_origin: None,
         };
         assert!(config.validate().is_ok());
     }
@@ -2003,6 +2009,7 @@ interval = 3600
             bind: "0.0.0.0".to_string(),
             port: 18791,
             auth_token: String::new(),
+            cors_origin: None,
         };
         assert!(config.validate().is_ok(), "Disabled API should skip validation");
     }
@@ -2014,6 +2021,7 @@ interval = 3600
             bind: "::1".to_string(),
             port: 18791,
             auth_token: String::new(),
+            cors_origin: None,
         };
         assert!(config.validate().is_ok());
     }
