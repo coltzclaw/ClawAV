@@ -241,7 +241,7 @@ pub fn classify_behavior(event: &ParsedEvent) -> Option<(BehaviorCategory, Sever
         if let Some(ref cmd) = event.command {
             for pattern in PRELOAD_BYPASS_PATTERNS {
                 if cmd.contains(pattern) {
-                    if !cmd.contains("clawtower") && !cmd.contains("clawtower") {
+                    if !cmd.contains("clawtower") && !cmd.contains("clawsudo") {
                         if ["ld", "collect2", "cc1", "cc1plus", "gcc", "g++", "rustc", "cc"].contains(&binary) {
                             // Normal compilation
                         } else if let Some(ref ppid_exe) = event.ppid_exe {

@@ -36,6 +36,11 @@ mod testing;
 use anyhow::Result;
 use config::Config;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Flag to restart the clawtower systemd service on TUI exit.
+/// Set when TUI mode stops an existing service; checked at shutdown.
+pub(crate) static RESTART_SERVICE_ON_EXIT: AtomicBool = AtomicBool::new(false);
 
 fn main() -> Result<()> {
     // Auth FIRST, before any async runtime
@@ -118,7 +123,7 @@ async fn async_main() -> Result<()> {
             std::thread::sleep(std::time::Duration::from_millis(500));
         }
         if service_was_running {
-            std::env::set_var("CLAWTOWER_RESTART_SERVICE", "1");
+            RESTART_SERVICE_ON_EXIT.store(true, Ordering::Relaxed);
         }
     }
 

@@ -18,7 +18,7 @@ use std::fs::File;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 
 /// Recommended auditd rules for ClawTower monitoring.
@@ -302,6 +302,19 @@ pub fn extract_field<'a>(line: &'a str, field: &str) -> Option<&'a str> {
         .map(|s| s.trim_matches('"'))
 }
 
+/// Extract the epoch seconds from an audit log timestamp.
+///
+/// Audit lines contain `msg=audit(EPOCH.MILLIS:SERIAL)`. This extracts
+/// the integer epoch seconds. Returns `None` if the pattern is missing
+/// or malformed (fail-open: callers should let the line through).
+pub fn extract_audit_epoch(line: &str) -> Option<u64> {
+    let start = line.find("msg=audit(")? + "msg=audit(".len();
+    let rest = &line[start..];
+    // Epoch ends at '.' (with millis) or ':' (without millis)
+    let end = rest.find(|c: char| c == '.' || c == ':')?;
+    rest[..end].parse().ok()
+}
+
 /// Decode hex-encoded argument strings from EXECVE records
 fn decode_hex_arg(s: &str) -> String {
     // auditd sometimes hex-encodes args: a0=2F7573722F62696E2F6375726C
@@ -529,7 +542,7 @@ pub fn check_tamper_event(event: &ParsedEvent) -> Option<Alert> {
         // Note: Node is NOT blanket-allowlisted — a compromised agent using Node
         // to read credentials must still trigger a Critical alert.
         let comm = extract_field(line, "comm").unwrap_or("unknown");
-        let is_openclaw = exe.contains("openclaw") || comm.contains("openclaw");
+        let is_openclaw = exe.contains("openclaw");
         if !is_openclaw {
             return Some(Alert::new(
                 Severity::Critical,
@@ -758,10 +771,19 @@ pub async fn tail_audit_log(
     let _ = reader.read_line(&mut discard);
     let mut line = String::new();
 
+    // Backlog filter (same as tail_audit_log_full)
+    let startup_epoch = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let mut catching_up = true;
+
     loop {
         line.clear();
         match reader.read_line(&mut line) {
             Ok(0) => {
+                catching_up = false;
+
                 // Check for log rotation: if the path now points to a different
                 // inode, auditd has rotated the file. Reopen to follow the new log.
                 if let Ok(meta) = std::fs::metadata(path) {
@@ -803,6 +825,14 @@ pub async fn tail_audit_log(
                 sleep(Duration::from_millis(200)).await;
             }
             Ok(_) => {
+                if catching_up {
+                    if let Some(epoch) = extract_audit_epoch(&line) {
+                        if epoch + 5 < startup_epoch {
+                            continue;
+                        }
+                    }
+                }
+
                 if let Some(alert) = parse_audit_line(&line, watched_users.as_deref()) {
                     let _ = tx.send(alert).await;
                 }
@@ -875,6 +905,14 @@ pub async fn tail_audit_log_full(
     let _ = reader.read_line(&mut discard);
     let mut line = String::new();
 
+    // Backlog filter: skip audit lines older than startup to avoid flooding
+    // the dashboard with stale events from the 64KB backlog window.
+    let startup_epoch = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let mut catching_up = true;
+
     let shadow_detectors: Vec<Box<dyn Detector>> = if behavior_shadow_mode {
         vec![Box::new(crate::detect::behavior_adapter::BehaviorDetector::new())]
     } else {
@@ -893,7 +931,7 @@ pub async fn tail_audit_log_full(
     loop {
         // Check if auditd rules need reloading (fixes inode staleness)
         if last_rule_reload.elapsed() >= RULE_RELOAD_INTERVAL {
-            match std::process::Command::new("auditctl")
+            match std::process::Command::new("/usr/sbin/auditctl")
                 .args(["-R", "/etc/audit/rules.d/clawtower.rules"])
                 .output()
             {
@@ -914,6 +952,9 @@ pub async fn tail_audit_log_full(
         line.clear();
         match reader.read_line(&mut line) {
             Ok(0) => {
+                // First EOF means we've consumed the backlog — switch to live mode.
+                catching_up = false;
+
                 // Check for log rotation before sleeping.
                 // auditd rotates to audit.log.1 etc — if the path inode changed,
                 // we must reopen to follow the new file. Without this, ClawTower
@@ -974,6 +1015,16 @@ pub async fn tail_audit_log_full(
                 sleep(Duration::from_millis(200)).await;
             }
             Ok(_) => {
+                // During backlog catch-up, skip lines older than startup minus
+                // a small grace window. Fail-open: unparseable timestamps pass.
+                if catching_up {
+                    if let Some(epoch) = extract_audit_epoch(&line) {
+                        if epoch + 5 < startup_epoch {
+                            continue;
+                        }
+                    }
+                }
+
                 if let Some(event) = parse_to_event(&line, watched_users.as_deref()) {
                     // Check for ClawTower tamper events (highest priority — fires for all users)
                     if let Some(tamper_alert) = check_tamper_event(&event) {
@@ -1065,6 +1116,32 @@ mod tests {
         fn id(&self) -> &'static str { "always-empty" }
         fn version(&self) -> &'static str { "test" }
         fn evaluate(&self, _event: &DetectionEvent) -> Vec<AlertProposal> { vec![] }
+    }
+
+    // ── extract_audit_epoch tests ────────────────────────────────────
+
+    #[test]
+    fn test_extract_audit_epoch_normal() {
+        let line = r#"type=SYSCALL msg=audit(1707849600.123:456): arch=c00000b7 syscall=56"#;
+        assert_eq!(extract_audit_epoch(line), Some(1707849600));
+    }
+
+    #[test]
+    fn test_extract_audit_epoch_no_millis() {
+        let line = r#"type=SYSCALL msg=audit(1707849600:456): arch=c00000b7 syscall=56"#;
+        assert_eq!(extract_audit_epoch(line), Some(1707849600));
+    }
+
+    #[test]
+    fn test_extract_audit_epoch_missing() {
+        let line = r#"type=SYSCALL some random garbage"#;
+        assert_eq!(extract_audit_epoch(line), None);
+    }
+
+    #[test]
+    fn test_extract_audit_epoch_malformed() {
+        let line = r#"type=SYSCALL msg=audit(notanumber.123:456): arch=c00000b7"#;
+        assert_eq!(extract_audit_epoch(line), None);
     }
 
     #[test]

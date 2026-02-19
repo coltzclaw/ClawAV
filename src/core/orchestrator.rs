@@ -493,7 +493,7 @@ async fn run_tui_frontend(
 
 /// Restart the clawtower systemd service if we stopped it for TUI mode.
 fn restart_service_if_needed() {
-    if std::env::var("CLAWTOWER_RESTART_SERVICE").is_ok() {
+    if crate::RESTART_SERVICE_ON_EXIT.load(std::sync::atomic::Ordering::Relaxed) {
         eprintln!("Restarting clawtower service...");
         let _ = std::process::Command::new("sudo")
             .args(["systemctl", "start", "clawtower"])

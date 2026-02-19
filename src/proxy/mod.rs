@@ -474,6 +474,12 @@ async fn handle_request(
     // Read body for DLP scanning
     let (parts, body) = req.into_parts();
     let body_bytes = hyper::body::to_bytes(body).await?;
+    if body_bytes.len() > 10 * 1024 * 1024 {
+        return Ok(Response::builder()
+            .status(StatusCode::PAYLOAD_TOO_LARGE)
+            .body(Body::from("Request body exceeds 10MB limit"))
+            .unwrap());
+    }
     let body_str = String::from_utf8_lossy(&body_bytes);
 
     // DLP scan
@@ -551,9 +557,15 @@ async fn handle_request(
         .path_and_query()
         .map(|pq| pq.as_str())
         .unwrap_or("/");
-    let upstream_uri: Uri = format!("{}{}", upstream, path_and_query)
-        .parse()
-        .unwrap_or_else(|_| Uri::from_static("http://localhost"));
+    let upstream_uri: Uri = match format!("{}{}", upstream, path_and_query).parse() {
+        Ok(uri) => uri,
+        Err(_) => {
+            return Ok(Response::builder()
+                .status(StatusCode::BAD_GATEWAY)
+                .body(Body::from("Invalid upstream URI"))
+                .unwrap());
+        }
+    };
 
     // Build forwarded request
     let mut builder = Request::builder()
@@ -601,7 +613,7 @@ async fn handle_request(
 fn rustls_connector() -> hyper_rustls::HttpsConnector<hyper::client::HttpConnector> {
     hyper_rustls::HttpsConnectorBuilder::new()
         .with_native_roots()
-        .https_or_http()
+        .https_only()
         .enable_http1()
         .build()
 }

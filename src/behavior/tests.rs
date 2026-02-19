@@ -389,6 +389,86 @@ fn test_is_ld_preload_persistence_line_rejects_fake_clawtower() {
     assert!(is_ld_preload_persistence_line("export LD_PRELOAD=/opt/clawtower/guard.so"));
 }
 
+// --- auth-profiles.json rate-based severity ---
+
+/// Serializes tests that share global CredReadTracker.
+static CRED_READ_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[test]
+fn test_auth_profiles_single_read_is_warning() {
+    let _lock = CRED_READ_TEST_LOCK.lock().unwrap();
+    super::patterns::reset_cred_read_tracker();
+
+    let event = make_exec_event(&["cat", "/home/openclaw/.openclaw/agents/main/agent/auth-profiles.json"]);
+    let result = classify_behavior(&event);
+    assert_eq!(result, Some((BehaviorCategory::DataExfiltration, Severity::Warning)));
+}
+
+#[test]
+fn test_auth_profiles_rapid_reads_escalate() {
+    let _lock = CRED_READ_TEST_LOCK.lock().unwrap();
+    super::patterns::reset_cred_read_tracker();
+
+    // First two reads: Warning
+    let event = make_exec_event(&["cat", "auth-profiles.json"]);
+    assert_eq!(classify_behavior(&event), Some((BehaviorCategory::DataExfiltration, Severity::Warning)));
+    assert_eq!(classify_behavior(&event), Some((BehaviorCategory::DataExfiltration, Severity::Warning)));
+    // Third read: escalates to Critical
+    assert_eq!(classify_behavior(&event), Some((BehaviorCategory::DataExfiltration, Severity::Critical)));
+    // Fourth read: stays Critical
+    assert_eq!(classify_behavior(&event), Some((BehaviorCategory::DataExfiltration, Severity::Critical)));
+}
+
+#[test]
+fn test_other_sensitive_files_still_critical() {
+    // .ssh/id_rsa goes through check_sensitive_file_reads → AGENT_SENSITIVE_PATHS → Critical
+    let event = make_exec_event(&["cat", "/home/user/.ssh/id_rsa"]);
+    assert_eq!(classify_behavior(&event), Some((BehaviorCategory::DataExfiltration, Severity::Critical)));
+
+    // gateway.yaml also in AGENT_SENSITIVE_PATHS → Critical (not intercepted by rate tracker)
+    let event2 = make_exec_event(&["cat", "/home/user/.openclaw/gateway.yaml"]);
+    assert_eq!(classify_behavior(&event2), Some((BehaviorCategory::DataExfiltration, Severity::Critical)));
+}
+
+#[test]
+fn test_interpreter_auth_profiles_warning() {
+    let _lock = CRED_READ_TEST_LOCK.lock().unwrap();
+    super::patterns::reset_cred_read_tracker();
+
+    let event = make_exec_event(&["python3", "-c", "open('auth-profiles.json').read()"]);
+    assert_eq!(classify_behavior(&event), Some((BehaviorCategory::DataExfiltration, Severity::Warning)));
+}
+
+#[test]
+fn test_interpreter_auth_profiles_escalates() {
+    let _lock = CRED_READ_TEST_LOCK.lock().unwrap();
+    super::patterns::reset_cred_read_tracker();
+
+    let event = make_exec_event(&["node", "-e", "require('fs').readFileSync('auth-profiles.json')"]);
+    classify_behavior(&event); // 1st: Warning
+    classify_behavior(&event); // 2nd: Warning
+    let result = classify_behavior(&event); // 3rd: Critical
+    assert_eq!(result, Some((BehaviorCategory::DataExfiltration, Severity::Critical)));
+}
+
+#[test]
+fn test_cred_read_tracker_thread_safety() {
+    let _lock = CRED_READ_TEST_LOCK.lock().unwrap();
+    super::patterns::reset_cred_read_tracker();
+
+    std::thread::scope(|s| {
+        for _ in 0..4 {
+            s.spawn(|| {
+                let event = make_exec_event(&["cat", "auth-profiles.json"]);
+                let result = classify_behavior(&event);
+                // Must always return Some — severity varies by timing
+                assert!(result.is_some());
+                assert_eq!(result.unwrap().0, BehaviorCategory::DataExfiltration);
+            });
+        }
+    });
+}
+
 // --- sudo patterns ---
 
 #[test]
@@ -473,6 +553,8 @@ fn test_cred_read_event_unknown_exe() {
 #[test]
 fn test_cred_read_event_openclaw_gateway() {
     use crate::sources::auditd::check_tamper_event;
+    // comm="openclaw-gateway" but exe="/usr/bin/node" — comm is spoofable via
+    // prctl(PR_SET_NAME), so only exe path is trusted for the allowlist.
     let event = ParsedEvent {
         syscall_name: "openat".to_string(),
         command: None,
@@ -485,7 +567,22 @@ fn test_cred_read_event_openclaw_gateway() {
     };
     let alert = check_tamper_event(&event);
     assert!(alert.is_some());
-    assert_eq!(alert.unwrap().severity, Severity::Info);
+    assert_eq!(alert.unwrap().severity, Severity::Critical);
+
+    // Legitimate openclaw binary in exe path → Info
+    let legit_event = ParsedEvent {
+        syscall_name: "openat".to_string(),
+        command: None,
+        args: vec![],
+        file_path: Some("/home/openclaw/.openclaw/gateway.yaml".to_string()),
+        success: true,
+        raw: r#"type=SYSCALL msg=audit(1707849600.123:456): arch=c00000b7 syscall=56 success=yes exe="/usr/local/bin/openclaw-gateway" comm="node" key="clawtower_cred_read""#.to_string(),
+        actor: Actor::Agent,
+        ppid_exe: None,
+    };
+    let legit_alert = check_tamper_event(&legit_event);
+    assert!(legit_alert.is_some());
+    assert_eq!(legit_alert.unwrap().severity, Severity::Info);
 }
 
 // --- Git monitoring ---

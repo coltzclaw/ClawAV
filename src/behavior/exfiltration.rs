@@ -18,12 +18,13 @@ use super::patterns::{
     ENCODING_TOOLS, LARGE_FILE_EXFIL_PATTERNS,
     AWS_CREDENTIAL_PATTERNS, GIT_CREDENTIAL_PATTERNS,
     MEMORY_DUMP_PATTERNS,
+    AUTH_PROFILES_FILENAME, record_cred_read,
 };
 
 /// Safe hosts that should not trigger exfiltration alerts for network tools.
 pub(crate) const SAFE_HOSTS: &[&str] = &[
     "gottamolt.gg", "mahamedia.us", "localhost", "127.0.0.1",
-    "api.anthropic.com", "api.openai.com", "github.com",
+    "api.anthropic.com", "api.openai.com", "api.github.com",
     "hooks.slack.com", "registry.npmjs.org",
     "crates.io", "pypi.org", "api.brave.com", "wttr.in",
     "api.open-meteo.com",
@@ -77,7 +78,8 @@ pub(crate) fn extract_hostnames_from_args(args: &[String]) -> Vec<String> {
 pub(crate) fn check_network_exfil(binary: &str, args: &[String]) -> Option<(BehaviorCategory, Severity)> {
     if EXFIL_COMMANDS.iter().any(|&c| binary.eq_ignore_ascii_case(c)) {
         let hostnames = extract_hostnames_from_args(args);
-        let is_safe = hostnames.iter().any(|h| safe_match::is_safe_host(h, SAFE_HOSTS));
+        let is_safe = !hostnames.is_empty()
+            && hostnames.iter().all(|h| safe_match::is_safe_host(h, SAFE_HOSTS));
         if !is_safe {
             return Some((BehaviorCategory::DataExfiltration, Severity::Critical));
         }
@@ -141,6 +143,13 @@ pub(crate) fn check_scripted_dns_exfil(binary: &str, cmd: &str) -> Option<(Behav
 pub(crate) fn check_interpreter_exfil(binary: &str, args: &[String]) -> Option<(BehaviorCategory, Severity)> {
     if NETWORK_CAPABLE_RUNTIMES.iter().any(|&c| binary.eq_ignore_ascii_case(c)) {
         let full_cmd = args.join(" ");
+
+        // auth-profiles.json: rate-based severity (Warning unless rapid access)
+        if full_cmd.contains(AUTH_PROFILES_FILENAME) {
+            let severity = record_cred_read();
+            return Some((BehaviorCategory::DataExfiltration, severity));
+        }
+
         let all_cred_paths: Vec<&str> = CRITICAL_READ_PATHS.iter()
             .chain(AGENT_SENSITIVE_PATHS.iter())
             .copied()
