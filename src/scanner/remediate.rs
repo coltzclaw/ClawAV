@@ -78,6 +78,20 @@ pub struct RemediationEntry {
     pub upstream: String,
 }
 
+/// Result of remediating a single key within a file.
+pub struct RemediationResult {
+    /// Whether the remediation succeeded.
+    pub success: bool,
+    /// The virtual key that replaced the original.
+    pub virtual_key: String,
+    /// Detected provider name (e.g., "anthropic", "slack").
+    pub provider: String,
+    /// The key prefix that was matched (e.g., "sk-ant-", "xoxb-").
+    pub prefix: String,
+    /// Error message if the remediation failed.
+    pub error: Option<String>,
+}
+
 /// Load the remediation manifest from disk, returning an empty manifest if
 /// the file does not exist or cannot be parsed.
 pub fn load_manifest(path: &str) -> RemediationManifest {
@@ -620,6 +634,219 @@ pub fn write_proxy_overlay(
         .map_err(|e| format!("Failed to write overlay to {}: {}", path, e))
 }
 
+// ── Helper functions ────────────────────────────────────────────────────
+
+/// Generate an 8-hex-char random remediation ID.
+fn generate_remediation_id() -> String {
+    use rand::RngCore;
+    let mut bytes = [0u8; 4];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    hex::encode(bytes)
+}
+
+/// Compute the SHA-256 hash of a key, returned as `"sha256:<hex>"`.
+fn hash_key(key: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(key.as_bytes());
+    format!("sha256:{}", hex::encode(hasher.finalize()))
+}
+
+/// Generate a Unix timestamp string from `SystemTime::now()`.
+fn unix_timestamp() -> String {
+    use std::time::SystemTime;
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs().to_string())
+        .unwrap_or_else(|_| "0".to_string())
+}
+
+// ── Main remediation orchestrator ───────────────────────────────────────
+
+/// Scan a config file for hardcoded API keys and remediate each one.
+///
+/// For every key found:
+/// 1. Generates a virtual replacement key
+/// 2. Encrypts the real key
+/// 3. Rewrites the config file in-place
+/// 4. Records the remediation in the manifest
+/// 5. Writes a proxy overlay for the virtual-to-real mapping
+///
+/// Returns a `RemediationResult` for each key found (both skipped and new).
+pub fn remediate_file(
+    file_path: &str,
+    manifest_path: &str,
+    overlay_path: &str,
+) -> Vec<RemediationResult> {
+    // 1. Read file content
+    let content = match std::fs::read_to_string(file_path) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+
+    // 2. Determine format and extract keys
+    let is_yaml = file_path.ends_with(".yaml") || file_path.ends_with(".yml");
+    let keys = if is_yaml {
+        extract_keys_from_yaml(&content)
+    } else {
+        extract_keys_from_json(&content)
+    };
+
+    // 3. No keys found → nothing to do
+    if keys.is_empty() {
+        return Vec::new();
+    }
+
+    // 4. Load existing manifest
+    let mut manifest = load_manifest(manifest_path);
+
+    // 5. Save file metadata for permission restore
+    #[cfg(unix)]
+    let original_permissions = {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(file_path)
+            .ok()
+            .map(|m| m.permissions().mode())
+    };
+
+    // 6. Process each key
+    let mut results = Vec::new();
+    let mut new_entries: Vec<RemediationEntry> = Vec::new();
+    let mut real_keys: Vec<String> = Vec::new();
+    let mut modified_content = content.clone();
+
+    for key in &keys {
+        // 6a. Check if already remediated (same source_file + json_path)
+        let already_done = manifest.remediations.iter().any(|entry| {
+            entry.source_file == file_path && entry.json_path == key.json_path
+        });
+        if already_done {
+            continue;
+        }
+
+        // 6b. Generate remediation ID
+        let rem_id = generate_remediation_id();
+
+        // 6c. Detect provider
+        let (provider, upstream) = detect_provider_from_context(&key.json_path, &key.full_key);
+
+        // 6d. Generate virtual key
+        let virtual_key = format!("vk-remediated-{}-{}", provider, rem_id);
+
+        // 6e. Encrypt real key
+        let encrypted = match encrypt_key(&key.full_key) {
+            Ok(enc) => enc,
+            Err(e) => {
+                results.push(RemediationResult {
+                    success: false,
+                    virtual_key: String::new(),
+                    provider: provider.clone(),
+                    prefix: key.prefix.clone(),
+                    error: Some(format!("Encryption failed: {}", e)),
+                });
+                continue;
+            }
+        };
+
+        // 6f. Rewrite config content
+        let rewrite_result = if is_yaml {
+            rewrite_yaml_key(&modified_content, &key.full_key, &virtual_key)
+        } else {
+            rewrite_json_key(&modified_content, &key.json_path, &virtual_key)
+        };
+
+        match rewrite_result {
+            Ok(new_content) => modified_content = new_content,
+            Err(e) => {
+                results.push(RemediationResult {
+                    success: false,
+                    virtual_key: String::new(),
+                    provider: provider.clone(),
+                    prefix: key.prefix.clone(),
+                    error: Some(format!("Rewrite failed: {}", e)),
+                });
+                continue;
+            }
+        }
+
+        // 6g. Create manifest entry
+        let entry = RemediationEntry {
+            id: rem_id,
+            timestamp: unix_timestamp(),
+            source_file: file_path.to_string(),
+            json_path: key.json_path.clone(),
+            original_key_prefix: key.prefix.clone(),
+            original_key_hash: hash_key(&key.full_key),
+            encrypted_real_key: encrypted.ciphertext,
+            encryption_salt: encrypted.salt,
+            virtual_key: virtual_key.clone(),
+            provider: provider.clone(),
+            upstream,
+        };
+
+        // 6h. Track real key for overlay
+        real_keys.push(key.full_key.clone());
+        new_entries.push(entry);
+
+        // 6i. Create result
+        results.push(RemediationResult {
+            success: true,
+            virtual_key,
+            provider,
+            prefix: key.prefix.clone(),
+            error: None,
+        });
+    }
+
+    // 7. If no new entries, return results
+    if new_entries.is_empty() {
+        return results;
+    }
+
+    // 8. Write modified config file
+    if let Err(e) = std::fs::write(file_path, &modified_content) {
+        return vec![RemediationResult {
+            success: false,
+            virtual_key: String::new(),
+            provider: String::new(),
+            prefix: String::new(),
+            error: Some(format!("Failed to write config file: {}", e)),
+        }];
+    }
+
+    // Restore permissions on Unix
+    #[cfg(unix)]
+    if let Some(mode) = original_permissions {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(file_path, std::fs::Permissions::from_mode(mode));
+    }
+
+    // 9. Write proxy overlay
+    if let Err(e) = write_proxy_overlay(overlay_path, &new_entries, &real_keys) {
+        return vec![RemediationResult {
+            success: false,
+            virtual_key: String::new(),
+            provider: String::new(),
+            prefix: String::new(),
+            error: Some(format!("Failed to write overlay: {}", e)),
+        }];
+    }
+
+    // 10. Update and save manifest
+    manifest.remediations.extend(new_entries);
+    if let Err(e) = save_manifest(manifest_path, &manifest) {
+        return vec![RemediationResult {
+            success: false,
+            virtual_key: String::new(),
+            provider: String::new(),
+            prefix: String::new(),
+            error: Some(format!("Failed to save manifest: {}", e)),
+        }];
+    }
+
+    results
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -979,5 +1206,161 @@ name: not-a-key
         let parsed: toml::Value = toml::from_str(&content).unwrap();
         let mappings = parsed["proxy"]["key_mapping"].as_array().unwrap();
         assert_eq!(mappings.len(), 2, "Should have exactly 2 mappings after append");
+    }
+
+    // ─── Helper function tests ─────────────────────────────────────────
+
+    #[test]
+    fn test_generate_remediation_id() {
+        let id = generate_remediation_id();
+        assert_eq!(id.len(), 8, "ID should be 8 hex chars");
+        assert!(
+            id.chars().all(|c| c.is_ascii_hexdigit()),
+            "ID should only contain hex digits"
+        );
+
+        // Two IDs should be different (probabilistic but practically certain)
+        let id2 = generate_remediation_id();
+        assert_ne!(id, id2, "Two generated IDs should differ");
+    }
+
+    #[test]
+    fn test_hash_key() {
+        let hash = hash_key("test-key-value");
+        assert!(hash.starts_with("sha256:"), "Hash should start with sha256: prefix");
+        // SHA-256 hex is 64 chars + "sha256:" prefix = 71
+        assert_eq!(hash.len(), 71, "Hash should be sha256: + 64 hex chars");
+
+        // Same input produces same hash
+        let hash2 = hash_key("test-key-value");
+        assert_eq!(hash, hash2, "Same input should produce same hash");
+
+        // Different input produces different hash
+        let hash3 = hash_key("different-key");
+        assert_ne!(hash, hash3, "Different inputs should produce different hashes");
+    }
+
+    // ─── Remediation orchestrator tests ────────────────────────────────
+
+    #[test]
+    fn test_remediate_json_file_end_to_end() {
+        // Skip if /etc/machine-id is not available (needed for encryption)
+        if std::fs::read_to_string("/etc/machine-id").is_err() {
+            eprintln!("Skipping remediation test: /etc/machine-id not available");
+            return;
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+
+        // Create openclaw.json with a Slack bot token
+        let config_path = dir.path().join("openclaw.json");
+        let config_content = r#"{
+  "channels": {
+    "slack": {
+      "bot_token": "xoxb-1234567890123-ABCDEFGHIJKLMNOP"
+    }
+  },
+  "name": "test-agent"
+}"#;
+        std::fs::write(&config_path, config_content).unwrap();
+
+        let manifest_path = dir.path().join("manifest.json");
+        let overlay_path = dir.path().join("overlay.toml");
+
+        let results = remediate_file(
+            config_path.to_str().unwrap(),
+            manifest_path.to_str().unwrap(),
+            overlay_path.to_str().unwrap(),
+        );
+
+        // Should have exactly 1 result
+        assert_eq!(results.len(), 1, "Should remediate exactly 1 key");
+        assert!(results[0].success, "Remediation should succeed");
+        assert_eq!(results[0].provider, "slack", "Provider should be slack");
+        assert_eq!(results[0].prefix, "xoxb-", "Prefix should be xoxb-");
+        assert!(
+            results[0].virtual_key.starts_with("vk-remediated-slack-"),
+            "Virtual key should start with vk-remediated-slack-"
+        );
+
+        // Verify config was rewritten
+        let rewritten = std::fs::read_to_string(&config_path).unwrap();
+        assert!(
+            !rewritten.contains("xoxb-"),
+            "Config should no longer contain original key"
+        );
+        assert!(
+            rewritten.contains("vk-remediated-"),
+            "Config should contain virtual key"
+        );
+
+        // Verify manifest was created with 1 entry
+        let manifest = load_manifest(manifest_path.to_str().unwrap());
+        assert_eq!(
+            manifest.remediations.len(),
+            1,
+            "Manifest should have 1 entry"
+        );
+        assert_eq!(manifest.remediations[0].provider, "slack");
+        assert!(manifest.remediations[0].original_key_hash.starts_with("sha256:"));
+
+        // Verify overlay was written with real key
+        let overlay_content = std::fs::read_to_string(&overlay_path).unwrap();
+        assert!(
+            overlay_content.contains("xoxb-1234567890123-ABCDEFGHIJKLMNOP"),
+            "Overlay should contain real key"
+        );
+    }
+
+    #[test]
+    fn test_remediate_idempotent() {
+        // Skip if /etc/machine-id is not available
+        if std::fs::read_to_string("/etc/machine-id").is_err() {
+            eprintln!("Skipping idempotency test: /etc/machine-id not available");
+            return;
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+
+        let config_path = dir.path().join("openclaw.json");
+        let config_content = r#"{
+  "channels": {
+    "slack": {
+      "bot_token": "xoxb-1234567890123-ABCDEFGHIJKLMNOP"
+    }
+  }
+}"#;
+        std::fs::write(&config_path, config_content).unwrap();
+
+        let manifest_path = dir.path().join("manifest.json");
+        let overlay_path = dir.path().join("overlay.toml");
+
+        // First remediation
+        let results1 = remediate_file(
+            config_path.to_str().unwrap(),
+            manifest_path.to_str().unwrap(),
+            overlay_path.to_str().unwrap(),
+        );
+        assert_eq!(results1.len(), 1, "First call should remediate 1 key");
+        assert!(results1[0].success);
+
+        // Second remediation — should return empty (already remediated)
+        let results2 = remediate_file(
+            config_path.to_str().unwrap(),
+            manifest_path.to_str().unwrap(),
+            overlay_path.to_str().unwrap(),
+        );
+        assert!(
+            results2.is_empty(),
+            "Second call should return empty (key already replaced, no keys found)"
+        );
+
+        // Manifest should still have exactly 1 entry
+        let manifest = load_manifest(manifest_path.to_str().unwrap());
+        assert_eq!(
+            manifest.remediations.len(),
+            1,
+            "Manifest should still have exactly 1 entry"
+        );
     }
 }
