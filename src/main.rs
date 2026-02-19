@@ -18,6 +18,7 @@ mod core;
 mod detect;
 mod enforcement;
 mod interface;
+mod policy;
 mod proxy;
 mod safe;
 mod scanner;
@@ -25,18 +26,12 @@ mod sentinel;
 mod sources;
 mod tui;
 
-// Flat modules (standalone, borderline cases)
+// Flat modules
 mod cli;
-mod compliance;
-mod netpolicy;
 
 // Test-only modules
 #[cfg(test)]
-mod integration_tests;
-#[cfg(test)]
-mod adversarial_tests;
-#[cfg(test)]
-mod benchmarks;
+mod testing;
 
 use anyhow::Result;
 use config::Config;
