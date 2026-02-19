@@ -18,7 +18,7 @@ use super::response::ResponseRequest;
 use super::{admin, aggregator, response, update};
 use crate::interface::slack::SlackNotifier;
 use crate::interface::api;
-use crate::{netpolicy, proxy, scanner, sentinel, tui};
+use crate::{policy, proxy, scanner, sentinel, tui};
 use crate::detect::barnacle;
 use crate::sources::{auditd, falco, firewall, journald, logtamper, memory_sentinel, network, samhain};
 
@@ -42,7 +42,7 @@ pub async fn run_watchdog(state: AppState, receivers: AlertReceivers) -> Result<
                 state.config.netpolicy.mode,
                 state.config.netpolicy.allowed_hosts.len(),
                 state.config.netpolicy.blocked_hosts.len());
-            Some(netpolicy::NetPolicy::from_config(&state.config.netpolicy))
+            Some(policy::network::NetPolicy::from_config(&state.config.netpolicy))
         } else {
             None
         };
