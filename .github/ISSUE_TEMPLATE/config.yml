@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security Vulnerability
+    url: https://github.com/ClawTower/ClawTower/blob/main/SECURITY.md
+    about: Report security vulnerabilities privately. Do NOT open a public issue.
+  - name: Questions & Support
+    url: https://github.com/ClawTower/ClawTower/discussions/categories/q-a
+    about: Ask questions in GitHub Discussions instead of opening an issue.

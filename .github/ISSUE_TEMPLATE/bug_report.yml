@@ -1,0 +1,90 @@
+name: Bug Report
+description: Something isn't working as expected
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please include enough detail to reproduce the issue.
+
+  - type: input
+    id: version
+    attributes:
+      label: ClawTower version
+      description: Output of `clawtower --version` or git commit hash
+      placeholder: "0.5.1-beta / abc1234"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of ClawTower is affected?
+      options:
+        - auditd / behavioral detection
+        - sentinel / file integrity
+        - network monitoring
+        - scanner
+        - clawsudo
+        - TUI dashboard
+        - Slack alerts
+        - API
+        - proxy / DLP
+        - config / config.d overlays
+        - installer / setup scripts
+        - auto-updater
+        - other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the bug. Include error messages, log output, or screenshots if relevant.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps to trigger the bug.
+      placeholder: |
+        1. Set config option X to Y
+        2. Start clawtower with `clawtower run --headless`
+        3. Trigger event Z
+        4. See error in logs
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, architecture, kernel version, relevant tooling versions
+      placeholder: |
+        - OS: Ubuntu 24.04 aarch64
+        - Kernel: 6.8.0
+        - auditd: 3.1.2
+        - Rust: 1.78
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste log output, journal entries, or terminal output. This will be formatted as code.
+      render: shell
+    validations:
+      required: false

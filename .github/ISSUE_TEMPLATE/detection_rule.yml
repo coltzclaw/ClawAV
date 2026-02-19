@@ -1,0 +1,79 @@
+name: Detection Rule / Scanner
+description: Propose a new detection pattern, behavioral rule, or security scanner
+labels: ["detection-rule", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        New detection rules and scanners are one of the highest-impact contributions.
+        See [CLAUDE.md](../../CLAUDE.md) for how to add scanners and detection rules.
+
+  - type: dropdown
+    id: type
+    attributes:
+      label: Type
+      options:
+        - behavioral detection rule (behavior.rs)
+        - barnacle pattern (JSON database)
+        - YAML policy rule
+        - security scanner (scanner.rs)
+        - sentinel watch path
+        - network policy rule
+        - other
+    validations:
+      required: true
+
+  - type: textarea
+    id: threat
+    attributes:
+      label: Threat description
+      description: What attack, misconfiguration, or suspicious behavior does this detect?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Threat category
+      options:
+        - data exfiltration
+        - privilege escalation
+        - persistence
+        - reconnaissance
+        - container escape
+        - side-channel attack
+        - security misconfiguration
+        - log tampering
+        - supply chain
+        - other
+    validations:
+      required: true
+
+  - type: textarea
+    id: detection
+    attributes:
+      label: Detection logic
+      description: How should ClawTower detect this? Include example commands, syscalls, file paths, or regex patterns.
+      placeholder: |
+        Example:
+        - Command pattern: `curl -X POST` to non-allowlisted host with `-d @/etc/shadow`
+        - Auditd signal: EXECVE with exe=/usr/bin/curl, args contain POST + file path
+        - Suggested severity: Critical
+    validations:
+      required: true
+
+  - type: textarea
+    id: false_positives
+    attributes:
+      label: False positive considerations
+      description: When might this trigger on legitimate activity? How can we reduce false positives?
+    validations:
+      required: false
+
+  - type: textarea
+    id: references
+    attributes:
+      label: References
+      description: MITRE ATT&CK IDs, CVEs, blog posts, or real-world examples.
+    validations:
+      required: false
