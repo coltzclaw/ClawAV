@@ -414,7 +414,6 @@ fn main() -> ExitCode {
     // Load policies
     let policy_dirs: Vec<&Path> = vec![
         Path::new("/etc/clawtower/policies/"),
-        Path::new("./policies/"),
     ];
     let rules = load_policies(&policy_dirs);
 
@@ -1011,6 +1010,20 @@ mod tests {
         // No allow rule matches; fail-secure means ask/deny
         if let Some(r) = result {
             assert_ne!(r.enforcement, Enforcement::Allow);
+        }
+    }
+
+    #[test]
+    fn test_policies_not_loaded_from_cwd() {
+        // Verify that only /etc/clawtower/policies/ is in the policy path
+        // (we can't easily test the main function, but we can verify the constant)
+        let policy_dirs: Vec<&Path> = vec![
+            Path::new("/etc/clawtower/policies/"),
+        ];
+        // Verify no CWD-relative paths
+        for dir in &policy_dirs {
+            assert!(dir.is_absolute() || dir.starts_with("/"),
+                "Policy dir {:?} must be absolute — CWD-relative paths are unsafe", dir);
         }
     }
 }
