@@ -12,7 +12,11 @@
 //! - Tier 2 (Standard): Block injection + exfil (real system threats), log the rest
 //! - Tier 3 (Strict): Block all categories
 
+use anyhow::{Context, Result};
+use regex::RegexSet;
+use serde::Deserialize;
 use std::collections::HashMap;
+use std::path::Path;
 
 /// Threat categories for prompt classification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -100,6 +104,115 @@ pub fn resolve_action(
         }
     }
     tier_default_action(tier, category)
+}
+
+#[derive(Debug, Deserialize)]
+struct PatternsFile {
+    #[allow(dead_code)]
+    version: Option<String>,
+    patterns: Vec<RawPattern>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawPattern {
+    name: String,
+    category: String,
+    #[allow(dead_code)]
+    severity: String,
+    pattern: String,
+    description: String,
+}
+
+#[derive(Debug, Clone)]
+struct PatternMeta {
+    name: String,
+    description: String,
+}
+
+struct CategoryScanner {
+    category: ThreatCategory,
+    regex_set: RegexSet,
+    patterns: Vec<PatternMeta>,
+    action: FirewallAction,
+}
+
+pub struct PromptFirewall {
+    scanners: Vec<CategoryScanner>,
+}
+
+fn parse_category(s: &str) -> Option<ThreatCategory> {
+    match s {
+        "prompt_injection" => Some(ThreatCategory::PromptInjection),
+        "exfil_via_prompt" => Some(ThreatCategory::ExfilViaPrompt),
+        "jailbreak" => Some(ThreatCategory::Jailbreak),
+        "tool_abuse" => Some(ThreatCategory::ToolAbuse),
+        "system_prompt_extract" => Some(ThreatCategory::SystemPromptExtract),
+        _ => None,
+    }
+}
+
+impl PromptFirewall {
+    pub fn load(
+        patterns_path: &(impl AsRef<Path> + ?Sized),
+        tier: u8,
+        overrides: &HashMap<String, String>,
+    ) -> Result<Self> {
+        let path = patterns_path.as_ref();
+        if !path.exists() {
+            tracing::warn!("Prompt firewall patterns not found: {}", path.display());
+            return Ok(Self {
+                scanners: Vec::new(),
+            });
+        }
+
+        let data = std::fs::read_to_string(path)
+            .with_context(|| format!("reading {}", path.display()))?;
+        let file: PatternsFile =
+            serde_json::from_str(&data).with_context(|| format!("parsing {}", path.display()))?;
+
+        let mut grouped: HashMap<ThreatCategory, Vec<(String, PatternMeta)>> = HashMap::new();
+        for raw in &file.patterns {
+            if let Some(cat) = parse_category(&raw.category) {
+                grouped.entry(cat).or_default().push((
+                    raw.pattern.clone(),
+                    PatternMeta {
+                        name: raw.name.clone(),
+                        description: raw.description.clone(),
+                    },
+                ));
+            }
+        }
+
+        let mut scanners = Vec::new();
+        for (category, entries) in grouped {
+            let (regexes, metas): (Vec<String>, Vec<PatternMeta>) =
+                entries.into_iter().unzip();
+            match RegexSet::new(&regexes) {
+                Ok(regex_set) => {
+                    let action = resolve_action(tier, category, overrides);
+                    scanners.push(CategoryScanner {
+                        category,
+                        regex_set,
+                        patterns: metas,
+                        action,
+                    });
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to compile RegexSet for {:?}: {}", category, e);
+                }
+            }
+        }
+
+        Ok(Self { scanners })
+    }
+
+    pub fn category_count(&self) -> usize {
+        self.scanners.len()
+    }
+
+    pub fn total_patterns(&self) -> usize {
+        self.scanners.iter().map(|s| s.patterns.len()).sum()
+    }
 }
 
 #[cfg(test)]
@@ -197,5 +310,42 @@ mod tests {
             resolve_action(2, ThreatCategory::PromptInjection, &overrides),
             FirewallAction::Block,
         );
+    }
+
+    #[test]
+    fn test_load_patterns_from_json() {
+        let json = r#"{
+            "version": "1.0.0",
+            "patterns": [
+                {
+                    "name": "role_hijack",
+                    "category": "prompt_injection",
+                    "severity": "critical",
+                    "pattern": "(?i)ignore\\s+previous\\s+instructions",
+                    "description": "Role hijacking attempt"
+                },
+                {
+                    "name": "exfil_encode",
+                    "category": "exfil_via_prompt",
+                    "severity": "critical",
+                    "pattern": "(?i)base64.{0,20}contents?\\s+of",
+                    "description": "Encode-and-exfil attempt"
+                }
+            ]
+        }"#;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("prompt-firewall-patterns.json");
+        std::fs::write(&path, json).unwrap();
+
+        let firewall = PromptFirewall::load(&path, 2, &HashMap::new()).unwrap();
+        assert_eq!(firewall.category_count(), 2);
+        assert!(firewall.total_patterns() >= 2);
+    }
+
+    #[test]
+    fn test_load_missing_file_returns_empty() {
+        let firewall =
+            PromptFirewall::load("/nonexistent/patterns.json", 2, &HashMap::new()).unwrap();
+        assert_eq!(firewall.total_patterns(), 0);
     }
 }
