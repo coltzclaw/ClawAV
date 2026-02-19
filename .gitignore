@@ -9,6 +9,5 @@ scripts/deploy.sh
 scripts/pentest.sh
 libclawtower*.so
 test_interpose
-docs/drafts/
-docs/install-page.html
+.docs/
 ClawTower.code-workspace

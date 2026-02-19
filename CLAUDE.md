@@ -13,7 +13,7 @@ ClawTower continuously monitors a Linux host where an AI agent (e.g., OpenClaw) 
 - **File integrity** — real-time inotify-based sentinel + periodic cognitive file baselines
 - **Firewall/network** — UFW state changes, iptables log parsing, network policy enforcement
 - **Log tampering** — detects truncation, deletion, or inode replacement of audit logs
-- **Security posture** — 30+ periodic system scans (see `docs/SECURITY-SCANNERS.md`)
+- **Security posture** — 30+ periodic system scans (see `.docs/SECURITY-SCANNERS.md`)
 
 ### The "Swallowed Key" Pattern
 
@@ -81,7 +81,7 @@ Sources (auditd, network, falco, samhain, SSH, firewall, scanner, sentinel, prox
 | `update.rs` | Self-updater (GitHub releases, SHA-256 + Ed25519 signature verification, chattr dance) |
 | `bin/clawsudo.rs` | Standalone sudo gatekeeper binary with YAML policy evaluation and Slack approval flow |
 
-For detailed module internals, see `docs/ARCHITECTURE.md` and `docs/MONITORING-SOURCES.md`.
+For detailed module internals, see `.docs/ARCHITECTURE.md` and `.docs/MONITORING-SOURCES.md`.
 
 ---
 
@@ -129,7 +129,7 @@ Standalone sudo gatekeeper. Fail-secure: no rules → deny all. Exit codes: 0 (o
 
 ## Configuration
 
-Config file: `/etc/clawtower/config.toml`. Full reference with all fields, types, and defaults: `docs/CONFIGURATION.md`.
+Config file: `/etc/clawtower/config.toml`. Full reference with all fields, types, and defaults: `.docs/CONFIGURATION.md`.
 
 **Config sections:** `general`, `slack`, `auditd`, `network`, `falco`, `samhain`, `ssh`, `api`, `scans`, `proxy`, `policy`, `barnacle`, `netpolicy`, `sentinel`, `auto_update`.
 
@@ -219,7 +219,7 @@ pub fn scan_my_check() -> ScanResult {
 3. Spawn in `async_main()`: `tokio::spawn(async move { my_source::tail_...(raw_tx.clone()).await; });`
 4. Optionally add config section (struct with `enabled: bool`, add to `Config`, gate spawn)
 
-See `docs/MONITORING-SOURCES.md` for full patterns and existing source implementations.
+See `.docs/MONITORING-SOURCES.md` for full patterns and existing source implementations.
 
 ### Adding Sentinel Watch Paths
 
@@ -254,14 +254,14 @@ To add compile-time defaults, modify `SentinelConfig::default()` in `src/config.
 
 | Document | Description |
 |----------|-------------|
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Module dependency graph, data flow diagrams, threat model |
-| [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) | Full config reference — every field, type, default, and TOML example |
-| [`docs/ALERT-PIPELINE.md`](docs/ALERT-PIPELINE.md) | Alert model, pipeline architecture, aggregator tuning |
-| [`docs/SENTINEL.md`](docs/SENTINEL.md) | Real-time file integrity monitoring deep dive |
-| [`docs/SECURITY-SCANNERS.md`](docs/SECURITY-SCANNERS.md) | All 30+ periodic security scanners |
-| [`docs/MONITORING-SOURCES.md`](docs/MONITORING-SOURCES.md) | Every real-time data source (auditd, journald, falco, samhain, etc.) |
-| [`docs/POLICIES.md`](docs/POLICIES.md) | YAML policy writing guide |
-| [`docs/CLAWSUDO-AND-POLICY.md`](docs/CLAWSUDO-AND-POLICY.md) | clawsudo, admin key, audit chain, API proxy, LD_PRELOAD guard |
-| [`docs/API.md`](docs/API.md) | HTTP REST API endpoints and response formats |
-| [`docs/INSTALL.md`](docs/INSTALL.md) | Installation, hardening steps, CLI commands, recovery |
-| [`docs/openclaw-integration.md`](docs/openclaw-integration.md) | OpenClaw security integration |
+| [`.docs/ARCHITECTURE.md`](.docs/ARCHITECTURE.md) | Module dependency graph, data flow diagrams, threat model |
+| [`.docs/CONFIGURATION.md`](.docs/CONFIGURATION.md) | Full config reference — every field, type, default, and TOML example |
+| [`.docs/ALERT-PIPELINE.md`](.docs/ALERT-PIPELINE.md) | Alert model, pipeline architecture, aggregator tuning |
+| [`.docs/SENTINEL.md`](.docs/SENTINEL.md) | Real-time file integrity monitoring deep dive |
+| [`.docs/SECURITY-SCANNERS.md`](.docs/SECURITY-SCANNERS.md) | All 30+ periodic security scanners |
+| [`.docs/MONITORING-SOURCES.md`](.docs/MONITORING-SOURCES.md) | Every real-time data source (auditd, journald, falco, samhain, etc.) |
+| [`.docs/POLICIES.md`](.docs/POLICIES.md) | YAML policy writing guide |
+| [`.docs/CLAWSUDO-AND-POLICY.md`](.docs/CLAWSUDO-AND-POLICY.md) | clawsudo, admin key, audit chain, API proxy, LD_PRELOAD guard |
+| [`.docs/API.md`](.docs/API.md) | HTTP REST API endpoints and response formats |
+| [`.docs/INSTALL.md`](.docs/INSTALL.md) | Installation, hardening steps, CLI commands, recovery |
+| [`.docs/openclaw-integration.md`](.docs/openclaw-integration.md) | OpenClaw security integration |

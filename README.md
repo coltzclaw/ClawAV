@@ -80,7 +80,7 @@ sudo scripts/setup-falco.sh         # Falco eBPF monitoring
 sudo scripts/setup-samhain.sh       # Samhain file integrity
 ```
 
-> 📖 **Full installation guide:** See [`docs/INSTALL.md`](docs/INSTALL.md) for prerequisites, hardening details, and recovery procedures.
+> 📖 **Full installation guide:** See [`.docs/INSTALL.md`](.docs/INSTALL.md) for prerequisites, hardening details, and recovery procedures.
 
 ### Available Scripts
 
@@ -220,7 +220,7 @@ blocked_hosts = ["evil.com"]
 enabled = true                  # Monitor SSH login events via journald
 ```
 
-> 📖 **Full configuration reference:** See [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) for every field, type, default value, and TOML example.
+> 📖 **Full configuration reference:** See [`.docs/CONFIGURATION.md`](.docs/CONFIGURATION.md) for every field, type, default value, and TOML example.
 
 ## Usage
 
@@ -669,7 +669,7 @@ AGPL-3.0 — see [LICENSE](LICENSE) for details.
 
 ---
 
-> 📚 **[Full Documentation Index →](docs/INDEX.md)**
+> 📚 **[Full Documentation Index →](.docs/INDEX.md)**
 
 ---
 

@@ -6,7 +6,7 @@ Thank you for your interest in contributing to ClawTower! This document explains
 
 **All contributors must sign a Contributor License Agreement before their first pull request can be merged.**
 
-ClawTower uses a CLA to ensure that the project can be dual-licensed (AGPL-3.0 for the open-source community, and a separate commercial license through Praxis AI). This is the same model used by the Apache Foundation, GitLab, and many other major open-source projects.
+ClawTower uses a CLA to ensure that the project can be dual-licensed (AGPL-3.0 for the open-source community, and a separate commercial license). This is the same model used by the Apache Foundation, GitLab, and many other major open-source projects.
 
 When you open your first pull request, the [CLA Assistant](https://github.com/cla-assistant/cla-assistant) bot will prompt you to sign the CLA electronically. This is a one-time process.
 
@@ -60,7 +60,7 @@ Without a CLA, every contributor retains exclusive copyright over their code, ma
 - All modules declared as `mod` in `main.rs`
 - Async runtime is Tokio — monitoring sources are spawned tasks
 - Alerts flow through `mpsc::channel` → Aggregator → TUI/Slack/API/audit chain
-- See `CLAUDE.md` and `docs/ARCHITECTURE.md` for full details
+- See `CLAUDE.md` and `.docs/ARCHITECTURE.md` for full details
 
 ## Reporting Security Vulnerabilities
 
