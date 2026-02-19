@@ -69,54 +69,6 @@ pub struct AuditChain {
 }
 
 impl AuditChain {
-    /// Create or resume chain from file
-    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let path = path.as_ref().to_path_buf();
-
-        // Ensure parent directory exists
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).context("Failed to create audit chain directory")?;
-        }
-
-        let (last_seq, last_hash) = if path.exists() {
-            // Resume: read last entry
-            let file = fs::File::open(&path)?;
-            let reader = BufReader::new(file);
-            let mut last_seq = 0u64;
-            let mut last_hash = GENESIS_HASH.to_string();
-
-            for line in reader.lines() {
-                let line = line?;
-                let line = line.trim();
-                if line.is_empty() {
-                    continue;
-                }
-                match serde_json::from_str::<AuditEntry>(line) {
-                    Ok(entry) => {
-                        last_seq = entry.seq;
-                        last_hash = entry.hash;
-                    }
-                    Err(_) => {
-                        // Skip malformed entries — chain may have been truncated or corrupted
-                        continue;
-                    }
-                }
-            }
-            // Verify chain integrity on resume
-            if last_seq > 0 {
-                if let Err(e) = Self::verify(&path) {
-                    bail!("Audit chain integrity check failed on resume: {}. Run `clawtower verify-audit` for details.", e);
-                }
-            }
-
-            (last_seq, last_hash)
-        } else {
-            (0, GENESIS_HASH.to_string())
-        };
-
-        Ok(Self { path, last_seq, last_hash, hmac_secret: None })
-    }
-
     /// Create or resume chain from file, with HMAC secret for chain integrity.
     ///
     /// When an HMAC secret is provided, `append()` uses HMAC-SHA256 instead of
@@ -330,7 +282,7 @@ mod tests {
         drop(tmp);
         std::fs::remove_file(&path).ok();
 
-        let mut chain = AuditChain::new(&path).unwrap();
+        let mut chain = AuditChain::new_with_hmac(&path, None).unwrap();
         let entry = chain.append(&test_alert(Severity::Info, "test", "genesis")).unwrap();
 
         assert_eq!(entry.seq, 1);
@@ -348,7 +300,7 @@ mod tests {
         drop(tmp);
         std::fs::remove_file(&path).ok();
 
-        let mut chain = AuditChain::new(&path).unwrap();
+        let mut chain = AuditChain::new_with_hmac(&path, None).unwrap();
         for i in 0..5 {
             chain.append(&test_alert(Severity::Warning, "test", &format!("msg {}", i))).unwrap();
         }
@@ -366,7 +318,7 @@ mod tests {
         drop(tmp);
         std::fs::remove_file(&path).ok();
 
-        let mut chain = AuditChain::new(&path).unwrap();
+        let mut chain = AuditChain::new_with_hmac(&path, None).unwrap();
         for i in 0..3 {
             chain.append(&test_alert(Severity::Info, "test", &format!("msg {}", i))).unwrap();
         }
@@ -404,7 +356,7 @@ mod tests {
         drop(tmp);
         std::fs::remove_file(&path).ok();
 
-        let mut chain = AuditChain::new(&path).unwrap();
+        let mut chain = AuditChain::new_with_hmac(&path, None).unwrap();
         chain.append(&test_alert(Severity::Info, "test", "only one")).unwrap();
 
         let count = AuditChain::verify(&path).unwrap();
@@ -420,7 +372,7 @@ mod tests {
         drop(tmp);
         std::fs::remove_file(&path).ok();
 
-        let mut chain = AuditChain::new(&path).unwrap();
+        let mut chain = AuditChain::new_with_hmac(&path, None).unwrap();
         chain.append(&test_alert(Severity::Info, "test", "entry one")).unwrap();
 
         // Tamper with the hash field directly
@@ -442,7 +394,7 @@ mod tests {
         drop(tmp);
         std::fs::remove_file(&path).ok();
 
-        let mut chain = AuditChain::new(&path).unwrap();
+        let mut chain = AuditChain::new_with_hmac(&path, None).unwrap();
         chain.append(&test_alert(Severity::Info, "test", "one")).unwrap();
         chain.append(&test_alert(Severity::Info, "test", "two")).unwrap();
 
@@ -467,7 +419,7 @@ mod tests {
         drop(tmp);
         std::fs::remove_file(&path).ok();
 
-        let mut chain = AuditChain::new(&path).unwrap();
+        let mut chain = AuditChain::new_with_hmac(&path, None).unwrap();
         for i in 0..3 {
             chain.append(&test_alert(Severity::Info, "test", &format!("msg {}", i))).unwrap();
         }
@@ -491,7 +443,7 @@ mod tests {
         drop(tmp);
         std::fs::remove_file(&path).ok();
 
-        let mut chain = AuditChain::new(&path).unwrap();
+        let mut chain = AuditChain::new_with_hmac(&path, None).unwrap();
         chain.append(&test_alert(Severity::Info, "test", "one")).unwrap();
         chain.append(&test_alert(Severity::Info, "test", "two")).unwrap();
 
@@ -534,7 +486,7 @@ mod tests {
 
         // Write valid chain
         {
-            let mut chain = AuditChain::new(&path).unwrap();
+            let mut chain = AuditChain::new_with_hmac(&path, None).unwrap();
             for i in 0..3 {
                 chain.append(&test_alert(Severity::Info, "test", &format!("msg {}", i))).unwrap();
             }
@@ -549,7 +501,7 @@ mod tests {
         std::fs::write(&path, lines.join("\n") + "\n").unwrap();
 
         // Resume should detect corruption
-        let result = AuditChain::new(&path);
+        let result = AuditChain::new_with_hmac(&path, None);
         assert!(result.is_err(), "Resuming from corrupted chain must fail");
     }
 
@@ -665,7 +617,7 @@ mod tests {
 
         // Write 3 entries
         {
-            let mut chain = AuditChain::new(&path).unwrap();
+            let mut chain = AuditChain::new_with_hmac(&path, None).unwrap();
             for i in 0..3 {
                 chain.append(&test_alert(Severity::Info, "test", &format!("msg {}", i))).unwrap();
             }
@@ -673,7 +625,7 @@ mod tests {
 
         // Resume and write 2 more
         {
-            let mut chain = AuditChain::new(&path).unwrap();
+            let mut chain = AuditChain::new_with_hmac(&path, None).unwrap();
             assert_eq!(chain.last_seq, 3);
             for i in 3..5 {
                 chain.append(&test_alert(Severity::Critical, "test", &format!("msg {}", i))).unwrap();

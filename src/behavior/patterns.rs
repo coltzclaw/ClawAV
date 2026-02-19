@@ -612,6 +612,7 @@ pub(crate) const SOCIAL_ENGINEERING_PATTERNS: &[(&str, &str, Severity)] = &[
 // ─── Plugin abuse patterns ───────────────────────────────────────────────
 
 /// Binaries indicating plugin misbehavior when spawned from a Node.js context.
+#[allow(dead_code)]
 pub(crate) const PLUGIN_ABUSE_BINARIES: &[&str] = &[
     "nc", "ncat", "netcat", "socat",   // raw network listeners/proxies
     "nmap", "masscan",                  // network scanning

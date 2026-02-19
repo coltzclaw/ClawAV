@@ -1,5 +1,7 @@
 # CLAUDE.md — ClawTower LLM Onboarding Guide
 
+> **Rule:** Never include "Generated with Claude Code" or similar AI attribution lines in commit messages, PR descriptions, or any output.
+
 > **ClawTower** is a tamper-proof, OS-level security watchdog for AI agents. It monitors the host system for threats, policy violations, and tampering — then alerts via TUI dashboard and Slack. It is designed so that even the AI agent it protects **cannot disable or modify it** (the "swallowed key" pattern).
 
 ---

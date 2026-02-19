@@ -231,6 +231,59 @@ echo ""
 info "── Sudoers Restrictions ──"
 SUDOERS_CHANGED=false
 
+# Reverse auto-remediated sudoers lines (from scan_sudoers_risk auto-remediation)
+# ClawTower's scanner comments out dangerous NOPASSWD lines with this prefix.
+CLAWTOWER_DISABLED_PREFIX="# CLAWTOWER-DISABLED: "
+REMEDIATION_REVERSED=false
+RESTORATION_FAILURES=false
+for f in /etc/sudoers.d/*; do
+    [[ -f "$f" ]] || continue
+    if grep -q "^${CLAWTOWER_DISABLED_PREFIX}" "$f" 2>/dev/null; then
+        info "Found auto-remediated lines in $(basename "$f")"
+        tmp=$(mktemp)
+        if ! sed "s|^${CLAWTOWER_DISABLED_PREFIX}||" "$f" > "$tmp"; then
+            warn "  sed failed on $f — skipping"
+            rm -f "$tmp"
+            RESTORATION_FAILURES=true
+            continue
+        fi
+        if [[ ! -s "$tmp" ]]; then
+            warn "  sed produced empty output for $f — skipping"
+            rm -f "$tmp"
+            RESTORATION_FAILURES=true
+            continue
+        fi
+        visudo_output=$(visudo -cf "$tmp" 2>&1)
+        if [[ $? -eq 0 ]]; then
+            if sudo cp "$tmp" "$f" && sudo chmod 0440 "$f"; then
+                log "  Restored original sudoers lines in $f"
+                REMEDIATION_REVERSED=true
+            else
+                warn "  FAILED to restore $f (cp or chmod failed) — manual recovery needed"
+                warn "  Temp file preserved at: $tmp"
+                RESTORATION_FAILURES=true
+                continue  # skip rm -f "$tmp" below
+            fi
+        else
+            warn "  visudo rejected restored $f — leaving as-is"
+            warn "  visudo said: $visudo_output"
+            RESTORATION_FAILURES=true
+        fi
+        rm -f "$tmp"
+    fi
+done
+if [[ -d /var/lib/clawtower/sudoers-backups ]]; then
+    if $RESTORATION_FAILURES; then
+        warn "  Keeping sudoers backups at /var/lib/clawtower/sudoers-backups/ (some restorations failed)"
+    else
+        sudo rm -rf /var/lib/clawtower/sudoers-backups
+        log "  Cleaned up sudoers backup directory"
+    fi
+fi
+if $REMEDIATION_REVERSED; then
+    REMOVED+=("sudoers auto-remediation (lines restored)")
+fi
+
 # Remove ClawTower deny file
 if [[ -f /etc/sudoers.d/clawtower-deny ]]; then
     info "Found /etc/sudoers.d/clawtower-deny (deny-list style)"
@@ -656,6 +709,117 @@ if [[ -f "$TRAY_DESKTOP" ]]; then
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
+# MODULE: Remediated Keys Restoration
+# ══════════════════════════════════════════════════════════════════════════════
+echo ""
+info "── Remediated Keys (hardcoded key auto-remediation) ──"
+REMEDIATION_MANIFEST="/etc/clawtower/remediated-keys.json"
+REMEDIATION_OVERLAY="/etc/clawtower/config.d/90-remediated-keys.toml"
+
+if [[ -f "$REMEDIATION_MANIFEST" ]]; then
+    RKEY_COUNT=$(grep -c '"virtual_key"' "$REMEDIATION_MANIFEST" 2>/dev/null || echo "0")
+    info "Found $RKEY_COUNT remediated key(s) in manifest."
+    info "ClawTower replaced hardcoded API keys in config files with proxy virtual keys."
+    info "Restoring puts the real API keys back so the agent can function without ClawTower."
+    echo ""
+
+    if ask "Restore remediated keys to original config files?"; then
+        # Prefer using the binary (it handles hash verification, encrypted backups, etc.)
+        CLAWTOWER_BIN="$(command -v clawtower 2>/dev/null || true)"
+        if [[ ! -x "$CLAWTOWER_BIN" ]]; then
+            for candidate in /usr/local/bin/clawtower ./target/release/clawtower; do
+                if [[ -x "$candidate" ]]; then
+                    CLAWTOWER_BIN="$candidate"
+                    break
+                fi
+            done
+        fi
+
+        if [[ -x "$CLAWTOWER_BIN" ]]; then
+            log "  Running clawtower restore-keys..."
+            RESTORE_OUTPUT=$("$CLAWTOWER_BIN" restore-keys 2>&1) || true
+            echo "$RESTORE_OUTPUT" | while IFS= read -r line; do
+                log "    $line"
+            done
+            REMOVED+=("remediated keys (restored via clawtower restore-keys)")
+        elif [[ -f "$REMEDIATION_OVERLAY" ]]; then
+            # Fallback: manual restoration using overlay file (binary unavailable)
+            warn "clawtower binary not available — attempting manual key restoration"
+            MANUAL_RESTORED=0
+            MANUAL_FAILED=0
+
+            # Parse each [[proxy.key_mapping]] block from the TOML overlay
+            # Fields: virtual_key, real, provider, upstream
+            while IFS= read -r vk_line; do
+                VIRTUAL_KEY=$(echo "$vk_line" | grep -oP 'virtual_key\s*=\s*"\K[^"]+' || true)
+                [[ -z "$VIRTUAL_KEY" ]] && continue
+
+                REAL_KEY=$(echo "$vk_line" | grep -oP 'real\s*=\s*"\K[^"]+' || true)
+                [[ -z "$REAL_KEY" ]] && continue
+
+                # Find source_file from manifest for this virtual key
+                SOURCE_FILE=$(python3 -c "
+import json, sys
+try:
+    m = json.load(open('$REMEDIATION_MANIFEST'))
+    for e in m.get('remediations', []):
+        if e.get('virtual_key') == '$VIRTUAL_KEY':
+            print(e['source_file'])
+            break
+except: pass
+" 2>/dev/null || true)
+
+                if [[ -z "$SOURCE_FILE" || ! -f "$SOURCE_FILE" ]]; then
+                    warn "  Cannot find source file for $VIRTUAL_KEY — skipping"
+                    ((MANUAL_FAILED++)) || true
+                    continue
+                fi
+
+                if grep -q "$VIRTUAL_KEY" "$SOURCE_FILE" 2>/dev/null; then
+                    # Safely replace virtual key with real key
+                    if sed -i "s|$VIRTUAL_KEY|$REAL_KEY|g" "$SOURCE_FILE" 2>/dev/null; then
+                        # Restore ownership to match parent directory
+                        TARGET_OWNER=$(stat -c '%U:%G' "$(dirname "$SOURCE_FILE")" 2>/dev/null || echo "openclaw:openclaw")
+                        sudo chown "$TARGET_OWNER" "$SOURCE_FILE" 2>/dev/null || true
+                        log "  Restored key in $SOURCE_FILE"
+                        ((MANUAL_RESTORED++)) || true
+                    else
+                        warn "  Failed to replace key in $SOURCE_FILE"
+                        ((MANUAL_FAILED++)) || true
+                    fi
+                else
+                    info "  Virtual key not found in $SOURCE_FILE — may already be restored"
+                fi
+            done < <(grep -A3 'virtual_key' "$REMEDIATION_OVERLAY" 2>/dev/null | paste -d' ' - - - -)
+
+            if [[ $MANUAL_RESTORED -gt 0 ]]; then
+                log "  Manually restored $MANUAL_RESTORED key(s)"
+                REMOVED+=("remediated keys ($MANUAL_RESTORED restored manually)")
+            fi
+            if [[ $MANUAL_FAILED -gt 0 ]]; then
+                warn "  $MANUAL_FAILED key(s) could not be restored — check $REMEDIATION_MANIFEST"
+            fi
+        else
+            warn "No overlay file and no clawtower binary — cannot restore keys"
+            warn "Virtual keys will remain in config files. Check $REMEDIATION_MANIFEST for details."
+            SKIPPED+=("remediated keys (no binary or overlay)")
+        fi
+
+        # Clean up manifest and overlay (config dir removal handles these too,
+        # but explicit cleanup is cleaner)
+        sudo rm -f "$REMEDIATION_MANIFEST" 2>/dev/null || true
+        sudo rm -f "$REMEDIATION_OVERLAY" 2>/dev/null || true
+    else
+        warn "  Keys NOT restored — config files still have virtual keys (vk-remediated-*)"
+        warn "  The agent will not be able to use these API keys without ClawTower's proxy"
+        warn "  Manifest preserved at: $REMEDIATION_MANIFEST"
+        SKIPPED+=("remediated key restoration")
+    fi
+else
+    info "No remediated keys found — skipping"
+fi
+
+# ══════════════════════════════════════════════════════════════════════════════
 # MODULE: Binaries
 # ══════════════════════════════════════════════════════════════════════════════
 echo ""
@@ -684,6 +848,54 @@ if [[ -d /etc/clawtower/quarantine ]] && [[ -n "$(ls -A /etc/clawtower/quarantin
         info "  Leaving quarantine in place — move files before removing /etc/clawtower/"
         SKIPPED+=("quarantined files")
     fi
+fi
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MODULE: Auth-Profiles Devirtualization
+# ══════════════════════════════════════════════════════════════════════════════
+echo ""
+info "── Auth-Profiles Devirtualization ──"
+AUTH_BACKUP="/etc/clawtower/auth-profiles.real.bak"
+if [[ -f "$AUTH_BACKUP" ]]; then
+    # Read auth_profile_path from config (or use default)
+    AUTH_PROFILE_DEFAULT="/home/openclaw/.openclaw/agents/main/agent/auth-profiles.json"
+    AUTH_PROFILE_PATH="$AUTH_PROFILE_DEFAULT"
+    if [[ -f /etc/clawtower/config.toml ]]; then
+        PARSED_PATH=$(grep -oP '^\s*auth_profile_path\s*=\s*"\K[^"]+' /etc/clawtower/config.toml 2>/dev/null || true)
+        [[ -n "$PARSED_PATH" ]] && AUTH_PROFILE_PATH="$PARSED_PATH"
+    fi
+
+    info "Found real-credential backup at $AUTH_BACKUP"
+    info "Target: $AUTH_PROFILE_PATH"
+
+    # Check if the live file has virtual tokens
+    if [[ -f "$AUTH_PROFILE_PATH" ]] && grep -q "vk-profile-" "$AUTH_PROFILE_PATH" 2>/dev/null; then
+        info "Current auth-profiles.json contains virtual tokens (vk-profile-*)."
+        if ask "Restore real credentials from backup?"; then
+            sudo chattr -ia "$AUTH_BACKUP" 2>/dev/null || true
+            if sudo cp "$AUTH_BACKUP" "$AUTH_PROFILE_PATH"; then
+                # Ensure the target user owns the restored file
+                TARGET_OWNER=$(stat -c '%U:%G' "$(dirname "$AUTH_PROFILE_PATH")" 2>/dev/null || echo "openclaw:openclaw")
+                sudo chown "$TARGET_OWNER" "$AUTH_PROFILE_PATH" 2>/dev/null || true
+                log "  Restored real credentials to $AUTH_PROFILE_PATH"
+                REMOVED+=("auth-profile virtualization (real creds restored)")
+            else
+                warn "  Failed to copy backup — real credentials NOT restored"
+                warn "  Backup preserved at: $AUTH_BACKUP"
+                SKIPPED+=("auth-profile restore (copy failed)")
+            fi
+        else
+            warn "  Real credentials NOT restored — auth-profiles.json still has virtual tokens"
+            warn "  The agent will not be able to authenticate until creds are manually replaced"
+            SKIPPED+=("auth-profile devirtualization")
+        fi
+    else
+        info "auth-profiles.json does not contain virtual tokens — no restore needed"
+    fi
+    # Clean up backup (only if config dir is being removed anyway)
+    sudo rm -f "$AUTH_BACKUP" 2>/dev/null || true
+else
+    info "No auth-profile backup found — skipping"
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -720,6 +932,7 @@ else
     fi
 fi
 sudo rm -rf /var/run/clawtower 2>/dev/null || true
+sudo rm -rf /var/lib/clawtower 2>/dev/null || true
 
 # ══════════════════════════════════════════════════════════════════════════════
 # MODULE: System User

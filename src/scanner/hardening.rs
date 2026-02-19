@@ -427,6 +427,7 @@ pub fn scan_docker_security() -> ScanResult {
 /// Parse Docker container inspect data for security checks (testable helper).
 ///
 /// Checks read-only rootfs, non-root user, and dangerous capabilities.
+#[allow(dead_code)]
 pub fn parse_docker_security_inspect(
     readonly_rootfs: &str,
     user: &str,

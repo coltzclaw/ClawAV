@@ -13,3 +13,4 @@ libclawtower*.so
 test_interpose
 .docs/
 ClawTower.code-workspace
+/docs/plans/

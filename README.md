@@ -57,6 +57,7 @@ sudo scripts/setup.sh
 
 # 3. Admin key is auto-generated on first run — save it!
 #    It is displayed ONCE in journalctl output and stored only as an Argon2 hash
+#    Lost your key? See docs/KEY-RESET.md (with root) or docs/RECOVERY.md (without)
 ```
 
 > **Note:** Don't edit `config.toml` directly — it gets replaced on updates. Put your customizations in `/etc/clawtower/config.d/*.toml` drop-in files instead.
@@ -263,6 +264,7 @@ clawtower uninstall
 
 # Admin key is auto-generated on first run and printed once — save it!
 # It is stored only as an Argon2 hash at /etc/clawtower/admin.key.hash
+# Lost it? See docs/KEY-RESET.md or docs/RECOVERY.md
 
 # Use clawsudo instead of sudo for AI agents
 clawsudo apt-get update
@@ -549,7 +551,7 @@ See **[CONTRIBUTING.md](CONTRIBUTING.md)** for how to get started, including the
 
 ## License
 
-ClawTower is licensed under **AGPL-3.0** — see [LICENSE](LICENSE). A commercial license is available for organizations that cannot comply with AGPL obligations — contact licensing@clawtower.dev.
+ClawTower is licensed under **AGPL-3.0** — see [LICENSE](LICENSE). A commercial license is available for organizations that cannot comply with AGPL obligations. .
 
 Contributors sign a [CLA](CONTRIBUTING.md) that enables dual-licensing. This is standard practice for projects like GitLab, Qt, and MongoDB.
 

@@ -285,6 +285,7 @@ fn do_virtualize(
 /// Called during uninstall or `clawtower devirtualize-auth`. Reads the
 /// backup from `/etc/clawtower/auth-profiles.real.bak`, writes it to the
 /// original path, and removes the backup.
+#[allow(dead_code)]
 pub fn restore_from_backup(auth_profile_path: &Path) -> Result<(), String> {
     let backup_path = Path::new(BACKUP_DIR).join(BACKUP_FILENAME);
     if !backup_path.exists() {
@@ -315,6 +316,7 @@ pub fn restore_from_backup(auth_profile_path: &Path) -> Result<(), String> {
 }
 
 /// Return the backup directory and filename (for use by uninstall scripts).
+#[allow(dead_code)]
 pub fn backup_path() -> PathBuf {
     Path::new(BACKUP_DIR).join(BACKUP_FILENAME)
 }

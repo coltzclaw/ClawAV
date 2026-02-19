@@ -549,6 +549,7 @@ impl BarnacleEngine {
     ///
     /// Detects: malicious postinstall scripts, dependency confusion indicators
     /// (scoped packages with suspiciously short names or exec-like install scripts).
+    #[allow(dead_code)]
     pub fn check_npm_manifest(package_json: &str) -> Vec<PatternMatch> {
         let mut matches = Vec::new();
 

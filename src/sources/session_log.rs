@@ -122,6 +122,7 @@ pub async fn tail_session_logs(state_dir: String, tx: mpsc::Sender<Alert>) {
 ///
 /// Returns a list of issues found. This is the pure-logic counterpart
 /// of `tail_session_logs` for use in tests.
+#[allow(dead_code)]
 pub fn check_sessions_directory(sessions_dir: &Path, previous_files: &HashMap<PathBuf, u64>) -> (Vec<String>, HashMap<PathBuf, u64>) {
     let mut issues = Vec::new();
     let mut current_files: HashMap<PathBuf, u64> = HashMap::new();
