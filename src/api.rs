@@ -213,6 +213,14 @@ fn parse_query_params(uri: &hyper::Uri) -> std::collections::HashMap<String, Str
         .unwrap_or_default()
 }
 
+/// Constant-time string comparison to prevent timing side-channel attacks.
+fn constant_time_eq(a: &str, b: &str) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
 async fn handle(
     req: Request<Body>,
     ctx: Arc<ApiContext>,
@@ -222,7 +230,7 @@ async fn handle(
         let authorized = req.headers()
             .get("authorization")
             .and_then(|v| v.to_str().ok())
-            .map(|v| v.strip_prefix("Bearer ").unwrap_or("") == ctx.auth_token.as_str())
+            .map(|v| constant_time_eq(v.strip_prefix("Bearer ").unwrap_or(""), &ctx.auth_token))
             .unwrap_or(false);
 
         if !authorized && req.uri().path() != "/api/health" {
@@ -782,5 +790,14 @@ mod tests {
         let resp = handle(req, ctx).await.unwrap();
         let cors = resp.headers().get("Access-Control-Allow-Origin").unwrap().to_str().unwrap();
         assert_eq!(cors, "*");
+    }
+
+    #[test]
+    fn test_constant_time_eq() {
+        assert!(constant_time_eq("abc", "abc"));
+        assert!(!constant_time_eq("abc", "abd"));
+        assert!(!constant_time_eq("abc", "ab"));
+        assert!(!constant_time_eq("", "a"));
+        assert!(constant_time_eq("", ""));
     }
 }
