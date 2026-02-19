@@ -36,6 +36,7 @@ COMMANDS:
     uninstall            Reverse hardening + remove ClawTower (requires admin key)
     profile list         List available deployment profiles
     update-ioc           Update IOC bundles with signature verification
+    restore-keys         Restore remediated API keys to original config files
     sync                 Update Barnacle pattern databases
     logs                 Tail the service logs (journalctl)
     help                 Show this help message
@@ -566,6 +567,23 @@ pub async fn dispatch_subcommand(subcommand: &str, rest_args: &[String], all_arg
                 eprintln!("Report written to {}", path);
             } else {
                 println!("{}", output);
+            }
+            Ok(true)
+        }
+        "restore-keys" => {
+            let dry_run = rest_args.iter().any(|a| a == "--dry-run");
+            let filter_id = rest_args.iter()
+                .find_map(|a| a.strip_prefix("--id="));
+            let count = crate::scanner::remediate::restore_keys(
+                crate::scanner::remediate::MANIFEST_PATH,
+                crate::scanner::remediate::OVERLAY_PATH,
+                filter_id,
+                dry_run,
+            );
+            if dry_run {
+                eprintln!("Dry run: {} key(s) would be restored.", count);
+            } else {
+                eprintln!("Restored {} key(s) to original config files.", count);
             }
             Ok(true)
         }

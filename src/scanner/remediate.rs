@@ -109,6 +109,10 @@ pub fn load_manifest(path: &str) -> RemediationManifest {
 
 /// Save the remediation manifest to disk as pretty-printed JSON.
 pub fn save_manifest(path: &str, manifest: &RemediationManifest) -> Result<(), String> {
+    if let Some(parent) = std::path::Path::new(path).parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create manifest directory: {}", e))?;
+    }
     let json = serde_json::to_string_pretty(manifest)
         .map_err(|e| format!("Failed to serialize manifest: {}", e))?;
     std::fs::write(path, json).map_err(|e| format!("Failed to write manifest to {}: {}", path, e))
@@ -218,31 +222,31 @@ pub fn decrypt_key(encrypted: &EncryptedKey) -> Result<String, String> {
 ///
 /// Returns `(provider, upstream_url)`. Unknown keys return `("unknown", "")`.
 pub fn detect_provider_from_context(json_path: &str, key_value: &str) -> (String, String) {
-    // Stage 1: JSON path patterns
+    // Stage 1: JSON path patterns (starts_with for precise matching)
     let path_lower = json_path.to_lowercase();
 
-    if path_lower.contains("channels.slack") {
+    if path_lower.starts_with("channels.slack") {
         return ("slack".to_string(), "https://slack.com/api".to_string());
     }
-    if path_lower.contains("providers.anthropic") {
+    if path_lower.starts_with("providers.anthropic") {
         return (
             "anthropic".to_string(),
             "https://api.anthropic.com".to_string(),
         );
     }
-    if path_lower.contains("providers.openai") {
+    if path_lower.starts_with("providers.openai") {
         return (
             "openai".to_string(),
             "https://api.openai.com".to_string(),
         );
     }
-    if path_lower.contains("providers.groq") {
+    if path_lower.starts_with("providers.groq") {
         return (
             "groq".to_string(),
             "https://api.groq.com/openai".to_string(),
         );
     }
-    if path_lower.contains("providers.xai") {
+    if path_lower.starts_with("providers.xai") {
         return ("xai".to_string(), "https://api.x.ai".to_string());
     }
 
@@ -528,7 +532,7 @@ pub fn rewrite_yaml_key(
     new_value: &str,
 ) -> Result<String, String> {
     if !yaml_str.contains(old_value) {
-        return Err(format!("Value '{}' not found in YAML", old_value));
+        return Err(format!("Value '{}...' not found in YAML", &old_value[..old_value.len().min(10)]));
     }
 
     let result: String = yaml_str
@@ -845,6 +849,253 @@ pub fn remediate_file(
     }
 
     results
+}
+
+// ── Restore keys ────────────────────────────────────────────────────────
+
+/// Write a raw list of KeyMappings to a TOML proxy overlay file.
+///
+/// Unlike [`write_proxy_overlay`], this does not merge with existing mappings —
+/// it overwrites the file with exactly the given list. Used by [`restore_keys`]
+/// to rewrite the overlay after removing restored entries.
+fn write_proxy_overlay_raw(path: &str, mappings: &[crate::proxy::KeyMapping]) -> Result<(), String> {
+    if mappings.is_empty() {
+        // If no mappings remain, delete the overlay file entirely
+        if std::path::Path::new(path).exists() {
+            std::fs::remove_file(path)
+                .map_err(|e| format!("Failed to remove overlay {}: {}", path, e))?;
+        }
+        return Ok(());
+    }
+
+    #[derive(Serialize)]
+    struct OverlayFile {
+        proxy: ProxySection,
+    }
+
+    #[derive(Serialize)]
+    struct ProxySection {
+        key_mapping: Vec<crate::proxy::KeyMapping>,
+    }
+
+    let overlay = OverlayFile {
+        proxy: ProxySection {
+            key_mapping: mappings.to_vec(),
+        },
+    };
+
+    let toml_str =
+        toml::to_string_pretty(&overlay).map_err(|e| format!("Failed to serialize TOML: {}", e))?;
+
+    std::fs::write(path, toml_str)
+        .map_err(|e| format!("Failed to write overlay to {}: {}", path, e))
+}
+
+/// Load proxy KeyMappings from an overlay TOML file.
+///
+/// Returns an empty vec if the file does not exist or cannot be parsed.
+fn load_overlay_mappings(path: &str) -> Vec<crate::proxy::KeyMapping> {
+    let content = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+
+    let parsed: toml::Table = match content.parse() {
+        Ok(t) => t,
+        Err(_) => return Vec::new(),
+    };
+
+    let Some(proxy) = parsed.get("proxy").and_then(|v| v.as_table()) else {
+        return Vec::new();
+    };
+    let Some(arr) = proxy.get("key_mapping").and_then(|v| v.as_array()) else {
+        return Vec::new();
+    };
+
+    arr.iter()
+        .filter_map(|item| {
+            toml::from_str::<crate::proxy::KeyMapping>(
+                &toml::to_string(item).unwrap_or_default(),
+            )
+            .ok()
+        })
+        .collect()
+}
+
+/// Restore remediated keys back to their original config files.
+///
+/// For each entry in the manifest (optionally filtered by `filter_id`):
+/// 1. Recovers the real key from the proxy overlay or by decrypting the backup
+/// 2. Verifies the SHA-256 hash matches `original_key_hash`
+/// 3. Replaces the virtual key with the real key in the source config file
+/// 4. Removes restored entries from the manifest and overlay
+///
+/// Returns the number of keys successfully restored.
+pub fn restore_keys(
+    manifest_path: &str,
+    overlay_path: &str,
+    filter_id: Option<&str>,
+    dry_run: bool,
+) -> usize {
+    // 1. Load manifest
+    let manifest = load_manifest(manifest_path);
+    if manifest.remediations.is_empty() {
+        eprintln!("No remediated keys found in manifest.");
+        return 0;
+    }
+
+    // 2. Load overlay to get real keys from proxy KeyMappings
+    let overlay_mappings = load_overlay_mappings(overlay_path);
+
+    // 3. Filter entries
+    let entries: Vec<&RemediationEntry> = manifest
+        .remediations
+        .iter()
+        .filter(|e| match filter_id {
+            Some(id) => e.id == id,
+            None => true,
+        })
+        .collect();
+
+    if entries.is_empty() {
+        if let Some(id) = filter_id {
+            eprintln!("No remediation entry found with id '{}'.", id);
+        } else {
+            eprintln!("No remediated keys found in manifest.");
+        }
+        return 0;
+    }
+
+    let mut restored_ids: Vec<String> = Vec::new();
+
+    for entry in &entries {
+        // 3a. Find real key: overlay first, then decrypt from backup
+        let real_key = overlay_mappings
+            .iter()
+            .find(|m| m.virtual_key == entry.virtual_key)
+            .map(|m| m.real.clone())
+            .or_else(|| {
+                let encrypted = EncryptedKey {
+                    ciphertext: entry.encrypted_real_key.clone(),
+                    salt: entry.encryption_salt.clone(),
+                };
+                decrypt_key(&encrypted).ok()
+            });
+
+        let real_key = match real_key {
+            Some(k) => k,
+            None => {
+                eprintln!(
+                    "  SKIP [{}]: could not recover real key for {} in {}",
+                    entry.id, entry.virtual_key, entry.source_file
+                );
+                continue;
+            }
+        };
+
+        // 3b. Verify SHA-256 hash
+        let computed_hash = hash_key(&real_key);
+        if computed_hash != entry.original_key_hash {
+            eprintln!(
+                "  SKIP [{}]: hash mismatch for {} (expected {}, got {})",
+                entry.id, entry.virtual_key, entry.original_key_hash, computed_hash
+            );
+            continue;
+        }
+
+        // 3c. Dry run: print what would be restored
+        if dry_run {
+            eprintln!(
+                "  WOULD RESTORE [{}]: {} -> {}...{} in {}",
+                entry.id,
+                entry.virtual_key,
+                &real_key[..real_key.len().min(8)],
+                &real_key[real_key.len().saturating_sub(4)..],
+                entry.source_file
+            );
+            restored_ids.push(entry.id.clone());
+            continue;
+        }
+
+        // 3d. Read source config file and replace virtual_key with real_key
+        let content = match std::fs::read_to_string(&entry.source_file) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!(
+                    "  SKIP [{}]: cannot read {}: {}",
+                    entry.id, entry.source_file, e
+                );
+                continue;
+            }
+        };
+
+        if !content.contains(&entry.virtual_key) {
+            eprintln!(
+                "  SKIP [{}]: virtual key {} not found in {}",
+                entry.id, entry.virtual_key, entry.source_file
+            );
+            continue;
+        }
+
+        let modified = content.replace(&entry.virtual_key, &real_key);
+
+        // 3e. Write modified file back
+        if let Err(e) = std::fs::write(&entry.source_file, &modified) {
+            eprintln!(
+                "  SKIP [{}]: cannot write {}: {}",
+                entry.id, entry.source_file, e
+            );
+            continue;
+        }
+
+        eprintln!(
+            "  RESTORED [{}]: {} in {}",
+            entry.id, entry.provider, entry.source_file
+        );
+        restored_ids.push(entry.id.clone());
+    }
+
+    let count = restored_ids.len();
+
+    // 4. If not dry_run, update manifest and overlay
+    if !dry_run && count > 0 {
+        // Collect virtual keys of restored entries for overlay cleanup
+        // (must happen before consuming manifest.remediations)
+        let restored_virtual_keys: Vec<String> = entries
+            .iter()
+            .filter(|e| restored_ids.contains(&e.id))
+            .map(|e| e.virtual_key.clone())
+            .collect();
+        drop(entries); // release borrow on manifest.remediations
+
+        // 4a. Remove restored entries from manifest
+        let remaining_remediations: Vec<RemediationEntry> = manifest
+            .remediations
+            .into_iter()
+            .filter(|e| !restored_ids.contains(&e.id))
+            .collect();
+
+        let updated_manifest = RemediationManifest {
+            version: 1,
+            remediations: remaining_remediations,
+        };
+
+        if let Err(e) = save_manifest(manifest_path, &updated_manifest) {
+            eprintln!("Warning: failed to update manifest: {}", e);
+        }
+
+        // 4b. Remove restored KeyMappings from overlay
+        let remaining_mappings: Vec<crate::proxy::KeyMapping> = overlay_mappings
+            .into_iter()
+            .filter(|m| !restored_virtual_keys.contains(&m.virtual_key))
+            .collect();
+
+        if let Err(e) = write_proxy_overlay_raw(overlay_path, &remaining_mappings) {
+            eprintln!("Warning: failed to update overlay: {}", e);
+        }
+    }
+
+    count
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
@@ -1362,5 +1613,198 @@ name: not-a-key
             1,
             "Manifest should still have exactly 1 entry"
         );
+    }
+
+    // ─── Restore keys tests ─────────────────────────────────────────────
+
+    #[test]
+    fn test_restore_keys_roundtrip() {
+        // Skip if /etc/machine-id is not available (needed for encryption)
+        if std::fs::read_to_string("/etc/machine-id").is_err() {
+            eprintln!("Skipping restore-keys test: /etc/machine-id not available");
+            return;
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+
+        // Create config file with a hardcoded key
+        let original_key = "xoxb-1234567890123-ABCDEFGHIJKLMNOP";
+        let config_path = dir.path().join("openclaw.json");
+        let config_content = format!(
+            r#"{{
+  "channels": {{
+    "slack": {{
+      "bot_token": "{}"
+    }}
+  }},
+  "name": "test-agent"
+}}"#,
+            original_key
+        );
+        std::fs::write(&config_path, &config_content).unwrap();
+
+        let manifest_path = dir.path().join("manifest.json");
+        let overlay_path = dir.path().join("overlay.toml");
+
+        // Step 1: Remediate — replace real key with virtual key
+        let results = remediate_file(
+            config_path.to_str().unwrap(),
+            manifest_path.to_str().unwrap(),
+            overlay_path.to_str().unwrap(),
+        );
+        assert_eq!(results.len(), 1, "Should remediate 1 key");
+        assert!(results[0].success, "Remediation should succeed");
+
+        // Verify the config no longer has the original key
+        let remediated_content = std::fs::read_to_string(&config_path).unwrap();
+        assert!(
+            !remediated_content.contains(original_key),
+            "Config should not contain original key after remediation"
+        );
+        assert!(
+            remediated_content.contains("vk-remediated-"),
+            "Config should contain virtual key after remediation"
+        );
+
+        // Step 2: Restore — put real key back
+        let count = restore_keys(
+            manifest_path.to_str().unwrap(),
+            overlay_path.to_str().unwrap(),
+            None,
+            false,
+        );
+        assert_eq!(count, 1, "Should restore 1 key");
+
+        // Verify: original key is back in config
+        let restored_content = std::fs::read_to_string(&config_path).unwrap();
+        assert!(
+            restored_content.contains(original_key),
+            "Config should contain original key after restore"
+        );
+        assert!(
+            !restored_content.contains("vk-remediated-"),
+            "Config should not contain virtual key after restore"
+        );
+
+        // Verify: manifest is empty
+        let manifest = load_manifest(manifest_path.to_str().unwrap());
+        assert!(
+            manifest.remediations.is_empty(),
+            "Manifest should be empty after restore"
+        );
+
+        // Verify: overlay file is removed (no mappings left)
+        assert!(
+            !overlay_path.exists(),
+            "Overlay file should be removed when no mappings remain"
+        );
+    }
+
+    #[test]
+    fn test_restore_keys_dry_run() {
+        // Skip if /etc/machine-id is not available
+        if std::fs::read_to_string("/etc/machine-id").is_err() {
+            eprintln!("Skipping restore-keys dry-run test: /etc/machine-id not available");
+            return;
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+
+        let original_key = "xoxb-1234567890123-ABCDEFGHIJKLMNOP";
+        let config_path = dir.path().join("openclaw.json");
+        let config_content = format!(
+            r#"{{
+  "channels": {{
+    "slack": {{
+      "bot_token": "{}"
+    }}
+  }}
+}}"#,
+            original_key
+        );
+        std::fs::write(&config_path, &config_content).unwrap();
+
+        let manifest_path = dir.path().join("manifest.json");
+        let overlay_path = dir.path().join("overlay.toml");
+
+        // Remediate first
+        let results = remediate_file(
+            config_path.to_str().unwrap(),
+            manifest_path.to_str().unwrap(),
+            overlay_path.to_str().unwrap(),
+        );
+        assert_eq!(results.len(), 1);
+
+        // Dry run restore — should NOT actually modify anything
+        let count = restore_keys(
+            manifest_path.to_str().unwrap(),
+            overlay_path.to_str().unwrap(),
+            None,
+            true,
+        );
+        assert_eq!(count, 1, "Dry run should report 1 key would be restored");
+
+        // Config should still have virtual key (not restored)
+        let content = std::fs::read_to_string(&config_path).unwrap();
+        assert!(
+            content.contains("vk-remediated-"),
+            "Config should still contain virtual key after dry run"
+        );
+        assert!(
+            !content.contains(original_key),
+            "Config should not contain original key after dry run"
+        );
+
+        // Manifest should still have 1 entry
+        let manifest = load_manifest(manifest_path.to_str().unwrap());
+        assert_eq!(
+            manifest.remediations.len(),
+            1,
+            "Manifest should still have 1 entry after dry run"
+        );
+
+        // Overlay should still exist
+        assert!(
+            overlay_path.exists(),
+            "Overlay should still exist after dry run"
+        );
+    }
+
+    #[test]
+    fn test_restore_keys_empty_manifest() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest_path = dir.path().join("manifest.json");
+        let overlay_path = dir.path().join("overlay.toml");
+
+        // No manifest file exists
+        let count = restore_keys(
+            manifest_path.to_str().unwrap(),
+            overlay_path.to_str().unwrap(),
+            None,
+            false,
+        );
+        assert_eq!(count, 0, "Should return 0 for empty manifest");
+    }
+
+    #[test]
+    fn test_restore_keys_filter_by_id() {
+        // Skip if /etc/machine-id is not available
+        if std::fs::read_to_string("/etc/machine-id").is_err() {
+            eprintln!("Skipping restore-keys filter test: /etc/machine-id not available");
+            return;
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let manifest_path = dir.path().join("manifest.json");
+        let overlay_path = dir.path().join("overlay.toml");
+
+        // Non-matching filter ID on empty manifest
+        let count = restore_keys(
+            manifest_path.to_str().unwrap(),
+            overlay_path.to_str().unwrap(),
+            Some("nonexistent-id"),
+            false,
+        );
+        assert_eq!(count, 0, "Should return 0 for non-matching filter ID");
     }
 }
