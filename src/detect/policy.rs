@@ -17,7 +17,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Sha256, Digest};
 
-use crate::alerts::Severity;
+use crate::core::alerts::Severity;
 use crate::sources::auditd::ParsedEvent;
 
 /// A single policy rule loaded from a YAML file.
@@ -285,7 +285,7 @@ impl PolicyEngine {
         if !spec.command.is_empty() {
             if let Some(ref cmd) = event.command {
                 let binary = event.args.first()
-                    .map(|s| crate::util::extract_binary_name(s))
+                    .map(|s| crate::core::util::extract_binary_name(s))
                     .unwrap_or("");
 
                 if spec.command.iter().any(|c| c.eq_ignore_ascii_case(binary)) {

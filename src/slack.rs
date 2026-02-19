@@ -10,7 +10,7 @@
 use anyhow::Result;
 use serde_json::json;
 
-use crate::alerts::Alert;
+use crate::core::alerts::Alert;
 use crate::config::SlackConfig;
 
 /// Sends formatted alerts and status messages to Slack via incoming webhooks.
@@ -118,9 +118,9 @@ impl SlackNotifier {
         }
 
         let color = match alert.severity {
-            crate::alerts::Severity::Info => "#36a64f",
-            crate::alerts::Severity::Warning => "#daa520",
-            crate::alerts::Severity::Critical => "#dc3545",
+            crate::core::alerts::Severity::Info => "#36a64f",
+            crate::core::alerts::Severity::Warning => "#daa520",
+            crate::core::alerts::Severity::Critical => "#dc3545",
         };
 
         let payload = json!({

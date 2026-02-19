@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
 
-use crate::alerts::{Alert, Severity};
+use crate::core::alerts::{Alert, Severity};
 
 /// Monitor audit log file for tampering indicators
 pub async fn monitor_log_integrity(

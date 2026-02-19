@@ -13,7 +13,7 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 use tokio::sync::{mpsc, watch};
 
-use crate::alerts::{Alert, Severity};
+use crate::core::alerts::{Alert, Severity};
 use crate::safe::safe_tail::SafeTailer;
 
 /// Map Falco priority string to our Severity

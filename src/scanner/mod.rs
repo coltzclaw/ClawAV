@@ -34,7 +34,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use tokio::time::{sleep, Duration};
 
-use crate::alerts::{Alert, Severity};
+use crate::core::alerts::{Alert, Severity};
 use crate::detect::cognitive::scan_cognitive_integrity;
 
 // Re-export scan functions from submodules so SecurityScanner::run_all_scans_with_config

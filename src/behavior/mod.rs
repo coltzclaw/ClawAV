@@ -39,7 +39,7 @@ mod financial;
 
 use std::fmt;
 
-use crate::alerts::Severity;
+use crate::core::alerts::Severity;
 use crate::sources::auditd::ParsedEvent;
 
 // Re-export public API from submodules

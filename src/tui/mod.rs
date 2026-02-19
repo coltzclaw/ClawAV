@@ -40,9 +40,9 @@ use tokio::sync::{mpsc, watch};
 use std::time::Duration;
 use std::path::{Path, PathBuf};
 
-use crate::alerts::{Alert, AlertStore, Severity};
+use crate::core::alerts::{Alert, AlertStore, Severity};
 use crate::config::Config;
-use crate::response::{PendingStatus, ResponseRequest, SharedPendingActions};
+use crate::core::response::{PendingStatus, ResponseRequest, SharedPendingActions};
 use crate::scanner::SharedScanResults;
 
 // ── Layout constants ──────────────────────────────────────────────────────────
@@ -916,7 +916,7 @@ fn render_alert_list(
         .iter()
         .map(|alert| {
             let age = now.signed_duration_since(alert.timestamp);
-            let age_str = crate::util::format_age_short(age);
+            let age_str = crate::core::util::format_age_short(age);
 
             let style = match alert.severity {
                 Severity::Critical => Style::default().fg(Color::Red).bold(),
@@ -1043,7 +1043,7 @@ fn render_dashboard(f: &mut Frame, area: Rect, app: &App) {
     } else {
         recent_crits.iter().map(|a| {
             let age = now.signed_duration_since(a.timestamp);
-            let age_str = crate::util::format_age_compact(age);
+            let age_str = crate::core::util::format_age_compact(age);
             let max_msg = (mid_cols[0].width as usize).saturating_sub(12);
             let msg: String = a.message.chars().take(max_msg).collect();
             Line::from(vec![
@@ -1103,7 +1103,7 @@ fn render_dashboard(f: &mut Frame, area: Rect, app: &App) {
                 let warn = results.iter().filter(|r| r.status == ScanStatus::Warn).count();
                 let fail = results.iter().filter(|r| r.status == ScanStatus::Fail).count();
                 let age_str = if let Some(ts) = results.iter().map(|r| r.timestamp).max() {
-                    crate::util::format_age_short(now.signed_duration_since(ts))
+                    crate::core::util::format_age_short(now.signed_duration_since(ts))
                 } else { "unknown".to_string() };
                 vec![
                     Line::from(vec![
@@ -1134,7 +1134,7 @@ fn render_dashboard(f: &mut Frame, area: Rect, app: &App) {
 
     // --- BOTTOM: uptime + version ---
     let uptime = app.startup_time.elapsed();
-    let uptime_str = crate::util::format_uptime(uptime);
+    let uptime_str = crate::core::util::format_uptime(uptime);
     let bottom_line = Line::from(vec![
         Span::raw("  Uptime: "),
         Span::styled(uptime_str, Style::default().fg(Color::Cyan)),
@@ -1149,7 +1149,7 @@ fn render_dashboard(f: &mut Frame, area: Rect, app: &App) {
 fn render_detail_view(f: &mut Frame, area: Rect, alert: &Alert) {
     let now = chrono::Local::now();
     let age = now.signed_duration_since(alert.timestamp);
-    let age_str = crate::util::format_age_long(age);
+    let age_str = crate::core::util::format_age_long(age);
 
     let severity_style = match alert.severity {
         Severity::Critical => Style::default().fg(Color::Red).bold(),

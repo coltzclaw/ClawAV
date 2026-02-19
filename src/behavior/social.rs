@@ -7,7 +7,7 @@
 //! archives, and deceptive prerequisite installations in both command streams
 //! and file content (markdown code blocks, inline commands).
 
-use crate::alerts::Severity;
+use crate::core::alerts::Severity;
 use super::patterns::{SOCIAL_ENGINEERING_PATTERNS, DOCUMENT_SOCIAL_ENGINEERING_PATTERNS};
 
 /// Patterns that indicate piping output to a shell or interpreter.

@@ -12,7 +12,7 @@
 //!
 //! Critical alerts always require human approval. Warning behavior is configurable.
 
-use crate::alerts::{Alert, Severity};
+use super::alerts::{Alert, Severity};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;

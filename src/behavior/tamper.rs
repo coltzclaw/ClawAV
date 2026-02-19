@@ -6,7 +6,7 @@
 //! LD_PRELOAD persistence detection, guard library allowlisting,
 //! and related tamper-detection utility functions.
 
-use crate::alerts::Severity;
+use crate::core::alerts::Severity;
 use super::BehaviorCategory;
 use super::patterns::{SHELL_PROFILE_PATHS, CLAWTOWER_GUARD_PATHS};
 

@@ -40,7 +40,7 @@ use std::time::Duration;
 use tokio::io::AsyncBufReadExt;
 use tokio::sync::mpsc;
 
-use crate::alerts::{Alert, Severity};
+use crate::core::alerts::{Alert, Severity};
 
 /// Maximum consecutive failures before a Critical alert is emitted in streaming mode.
 const MAX_CONSECUTIVE_FAILURES: u32 = 5;

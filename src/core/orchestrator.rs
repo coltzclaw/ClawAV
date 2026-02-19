@@ -11,14 +11,13 @@ use anyhow::Result;
 use std::path::{Path, PathBuf};
 use tokio::sync::{mpsc, watch};
 
-use crate::aggregator::AggregatorConfig;
-use crate::alerts::{Alert, Severity};
-use crate::app_state::{AlertReceivers, AppState};
-use crate::response::ResponseRequest;
+use super::aggregator::AggregatorConfig;
+use super::alerts::{Alert, Severity};
+use super::app_state::{AlertReceivers, AppState};
+use super::response::ResponseRequest;
+use super::{admin, aggregator, response, update};
 use crate::slack::SlackNotifier;
-use crate::{
-    admin, aggregator, api, netpolicy, proxy, response, scanner, sentinel, tui, update,
-};
+use crate::{api, netpolicy, proxy, scanner, sentinel, tui};
 use crate::detect::barnacle;
 use crate::sources::{auditd, falco, firewall, journald, logtamper, memory_sentinel, network, samhain};
 
@@ -441,7 +440,7 @@ async fn run_headless(mut alert_rx: mpsc::Receiver<Alert>) -> Result<()> {
 async fn run_tui_frontend(
     alert_rx: mpsc::Receiver<Alert>,
     config_path: PathBuf,
-    pending_actions: crate::response::SharedPendingActions,
+    pending_actions: super::response::SharedPendingActions,
     scan_results: crate::scanner::SharedScanResults,
     response_tx: Option<mpsc::Sender<ResponseRequest>>,
     falco_path_tx: watch::Sender<PathBuf>,

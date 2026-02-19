@@ -16,7 +16,7 @@
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 
-use crate::alerts::{Alert, Severity};
+use crate::core::alerts::{Alert, Severity};
 
 // ── Config types (moved from config.rs) ──────────────────────────────────────
 
@@ -386,7 +386,7 @@ pub struct ExportStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::alerts::{Alert, Severity};
+    use crate::core::alerts::{Alert, Severity};
 
     fn test_alert(severity: Severity, source: &str, message: &str) -> Alert {
         Alert::new(severity, source, message)

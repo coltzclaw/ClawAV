@@ -7,7 +7,7 @@
 //! for network exfiltration tool analysis, DNS tunneling detection,
 //! scripted exfiltration, and data staging patterns.
 
-use crate::alerts::Severity;
+use crate::core::alerts::Severity;
 use crate::safe::safe_match;
 use super::BehaviorCategory;
 use super::patterns::{
@@ -26,6 +26,7 @@ pub(crate) const SAFE_HOSTS: &[&str] = &[
     "api.anthropic.com", "api.openai.com", "github.com",
     "hooks.slack.com", "registry.npmjs.org",
     "crates.io", "pypi.org", "api.brave.com", "wttr.in",
+    "api.open-meteo.com",
     "ssm.us-east-1.amazonaws.com",
     "s3.us-east-1.amazonaws.com",
     "ec2.us-east-1.amazonaws.com",

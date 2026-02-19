@@ -16,7 +16,7 @@ use std::path::Path;
 use tokio::sync::mpsc;
 use ipnet::IpNet;
 
-use crate::alerts::{Alert, Severity};
+use crate::core::alerts::{Alert, Severity};
 use crate::safe::safe_match::prefix_matches;
 use crate::safe::safe_tail::SafeTailer;
 

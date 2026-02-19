@@ -11,12 +11,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
-use crate::alerts::{Alert, Severity};
+use super::alerts::{Alert, Severity};
+use super::response::{self, SharedPendingActions};
 use crate::api;
 use crate::config::Config;
 use crate::detect::barnacle;
 use crate::detect::policy;
-use crate::response::{self, SharedPendingActions};
 use crate::scanner;
 use crate::slack::SlackNotifier;
 

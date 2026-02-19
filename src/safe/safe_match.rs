@@ -18,7 +18,7 @@
 //! - [`field_exact_match`] — Exact string equality (no substring matching)
 //! - [`parse_log_severity`] — Extracts severity from the prefix portion of a log line
 
-use crate::alerts::Severity;
+use crate::core::alerts::Severity;
 
 /// Matches a hostname against a domain pattern, supporting wildcard prefixes.
 ///
@@ -189,7 +189,7 @@ pub fn field_exact_match(field: &str, pattern: &str) -> bool {
 /// # Examples
 ///
 /// ```ignore
-/// use crate::alerts::Severity;
+/// use crate::core::alerts::Severity;
 /// // Picks up CRIT from prefix, ignores WARN in body
 /// assert_eq!(
 ///     parse_log_severity("CRIT: [2026-02-17] file /tmp/WARN_data modified"),
@@ -231,7 +231,7 @@ pub fn parse_log_severity(line: &str) -> Option<Severity> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::alerts::Severity;
+    use crate::core::alerts::Severity;
 
     // ───────────────────────────── domain_matches ─────────────────────────────
 

@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use tokio::sync::{mpsc, watch};
 use tokio::time::Duration;
 
-use crate::alerts::{Alert, Severity};
+use crate::core::alerts::{Alert, Severity};
 use crate::safe::safe_match::parse_log_severity;
 use crate::safe::safe_tail::SafeTailer;
 
@@ -112,7 +112,7 @@ pub async fn tail_samhain_log_dynamic(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::alerts::Severity;
+    use crate::core::alerts::Severity;
 
     #[test]
     fn test_parse_crit_line() {

@@ -6,7 +6,7 @@
 //! Environment enumeration, config reads, recon command invocations,
 //! and file access patterns indicative of system probing.
 
-use crate::alerts::Severity;
+use crate::core::alerts::Severity;
 use super::BehaviorCategory;
 use super::patterns::{RECON_COMMANDS, RECON_ALLOWLIST, RECON_PATHS};
 

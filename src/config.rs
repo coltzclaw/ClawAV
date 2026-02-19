@@ -385,7 +385,7 @@ impl Default for NetPolicyConfig {
 }
 
 // Response + IncidentMode config types moved to response.rs — re-exported for backward compatibility
-pub use crate::response::{ResponseConfig, IncidentModeConfig};
+pub use crate::core::response::{ResponseConfig, IncidentModeConfig};
 
 // Cloud config types moved to cloud.rs — re-exported for backward compatibility
 pub use crate::cloud::CloudConfig;

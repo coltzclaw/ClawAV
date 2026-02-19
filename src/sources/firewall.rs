@@ -16,7 +16,7 @@ use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
 use std::time::Duration as StdDuration;
 
-use crate::alerts::{Alert, Severity};
+use crate::core::alerts::{Alert, Severity};
 use crate::safe::safe_cmd::SafeCommand;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

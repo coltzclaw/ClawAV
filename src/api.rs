@@ -23,8 +23,8 @@ use hyper::{Body, Request, Response, Server, StatusCode};
 use serde::Serialize;
 use tokio::sync::{mpsc, Mutex};
 
-use crate::alerts::{Alert, Severity};
-use crate::response::{ResponseRequest, SharedPendingActions};
+use crate::core::alerts::{Alert, Severity};
+use crate::core::response::{ResponseRequest, SharedPendingActions};
 use crate::scanner::SharedScanResults;
 
 /// Thread-safe ring buffer of alerts for the API.
@@ -430,7 +430,7 @@ async fn handle(
 
             // Verify audit chain
             let audit_proof = if let Some(ref path) = ctx.audit_chain_path {
-                match crate::audit_chain::AuditChain::verify(path) {
+                match crate::core::audit_chain::AuditChain::verify(path) {
                     Ok(count) => AuditChainProof {
                         chain_file: Some(path.display().to_string()),
                         total_entries: Some(count),
@@ -555,7 +555,7 @@ pub async fn run_api_server_with_context(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::alerts::{Alert, Severity};
+    use crate::core::alerts::{Alert, Severity};
 
     fn test_ctx(auth_token: &str) -> Arc<ApiContext> {
         Arc::new(ApiContext {

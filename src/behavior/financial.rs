@@ -6,7 +6,7 @@
 //! Crypto wallet access, private key detection, transaction signing,
 //! and crypto CLI tool usage.
 
-use crate::alerts::Severity;
+use crate::core::alerts::Severity;
 use super::BehaviorCategory;
 use super::patterns::{CRYPTO_WALLET_PATHS, CRYPTO_KEY_PATTERNS, CRYPTO_CLI_TOOLS};
 

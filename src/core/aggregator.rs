@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
-use crate::alerts::Alert;
+use super::alerts::Alert;
 
 /// Configuration for the alert aggregator
 pub struct AggregatorConfig {
@@ -150,7 +150,7 @@ impl Aggregator {
         // Critical alerts are NEVER deduplicated — they always pass through.
         // This prevents an attacker from poisoning the dedup cache with
         // similar-shaped benign alerts to suppress real critical detections (H9).
-        if alert.severity == crate::alerts::Severity::Critical {
+        if alert.severity == super::alerts::Severity::Critical {
             return Some(alert);
         }
 
@@ -174,7 +174,7 @@ pub async fn run_aggregator(
     output_tx: mpsc::Sender<Alert>,
     slack_tx: mpsc::Sender<Alert>,
     config: AggregatorConfig,
-    min_slack_severity: crate::alerts::Severity,
+    min_slack_severity: super::alerts::Severity,
     api_store: crate::api::SharedAlertStore,
 ) {
     let mut aggregator = Aggregator::new(config);
@@ -194,7 +194,7 @@ pub async fn run_aggregator(
     } else {
         format!("/tmp/clawtower-{}/audit.chain", unsafe { libc::getuid() })
     };
-    let mut audit_chain = match crate::audit_chain::AuditChain::new(&chain_path) {
+    let mut audit_chain = match super::audit_chain::AuditChain::new(&chain_path) {
         Ok(chain) => Some(chain),
         Err(e) => {
             eprintln!("Warning: Failed to initialize audit chain: {}. Continuing without it.", e);
@@ -258,7 +258,7 @@ pub async fn run_aggregator(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::alerts::{Alert, Severity};
+    use crate::core::alerts::{Alert, Severity};
 
     fn make_alert(source: &str, msg: &str, sev: Severity) -> Alert {
         Alert::new(sev, source, msg)

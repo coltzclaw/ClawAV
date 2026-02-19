@@ -7,7 +7,7 @@
 //! kernel module loading, SSH key injection, process injection,
 //! and SUID/capability manipulation detection.
 
-use crate::alerts::Severity;
+use crate::core::alerts::Severity;
 use super::BehaviorCategory;
 use super::patterns::{
     CONTAINER_ESCAPE_BINARIES, CONTAINER_ESCAPE_PATTERNS,

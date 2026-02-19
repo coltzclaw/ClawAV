@@ -10,7 +10,7 @@
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
-use crate::alerts::Severity;
+use super::alerts::Severity;
 
 /// One-way risk accumulator that triggers when session risk exceeds a threshold.
 ///

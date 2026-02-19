@@ -243,6 +243,8 @@ fn scan_user_persistence_inner(crontab_override: Option<&str>) -> Vec<ScanResult
             "openclaw.service",
             "openclaw-gateway.service",
             "openclaw-worker.service",
+            "claw-webserver.service",
+            "claw-ws.service",
             "default.target.wants",
         ];
         let user_systemd = format!("{}/.config/systemd/user", home);

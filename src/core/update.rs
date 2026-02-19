@@ -17,11 +17,11 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::Command;
 use tokio::sync::mpsc;
-use crate::alerts::{Alert, Severity};
+use super::alerts::{Alert, Severity};
 use std::time::Duration;
 
 const GITHUB_REPO: &str = "ClawTower/ClawTower";
-const RELEASE_PUBLIC_KEY: &[u8; 32] = include_bytes!("release-key.pub");
+const RELEASE_PUBLIC_KEY: &[u8; 32] = include_bytes!("../release-key.pub");
 
 /// Verify an Ed25519 signature over the SHA-256 digest of a binary.
 ///
@@ -91,7 +91,7 @@ fn get_admin_key(args: &[String]) -> Result<String> {
 fn verify_admin_key(key: &str) -> Result<bool> {
     let hash = fs::read_to_string(ADMIN_KEY_HASH_PATH)
         .context("Cannot read admin key hash — is ClawTower installed?")?;
-    Ok(crate::admin::verify_key(key, hash.trim()))
+    Ok(super::admin::verify_key(key, hash.trim()))
 }
 
 /// Fetch release info from GitHub API (latest or specific version)

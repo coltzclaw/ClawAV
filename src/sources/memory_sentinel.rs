@@ -12,7 +12,7 @@
 //! a periodic scan loop that baselines and verifies process memory integrity,
 //! sending violations to the alert pipeline.
 
-use crate::alerts::{Alert, Severity};
+use crate::core::alerts::{Alert, Severity};
 use crate::enforcement::capabilities::PlatformCapabilities;
 use crate::config::MemorySentinelConfig;
 use std::fs;

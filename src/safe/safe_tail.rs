@@ -28,7 +28,7 @@ use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncSeekExt, BufReader};
 use tokio::sync::mpsc;
 
-use crate::alerts::{Alert, Severity};
+use crate::core::alerts::{Alert, Severity};
 
 /// A resilient, security-hardened async log file tailer.
 ///

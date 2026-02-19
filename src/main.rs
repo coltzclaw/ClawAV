@@ -10,18 +10,13 @@
 //! The architecture is a channel pipeline:
 //! Sources → raw_tx → Aggregator → alert_tx → TUI/headless + slack_tx → Slack
 
-mod admin;
+mod core;
 mod agent;
-mod alerts;
-mod aggregator;
-mod app_state;
 mod cli;
 mod detect;
 mod export;
-mod orchestrator;
 mod enforcement;
 mod api;
-mod audit_chain;
 mod behavior;
 mod cloud;
 mod compliance;
@@ -37,9 +32,6 @@ mod sources;
 mod slack;
 mod tui;
 mod tui_client;
-mod response;
-mod update;
-mod util;
 
 #[cfg(test)]
 mod integration_tests;
@@ -138,6 +130,6 @@ async fn async_main() -> Result<()> {
     }
 
     // Build state and hand off to orchestrator
-    let (state, receivers) = app_state::AppState::build(config, config_path, profile_name, headless);
-    orchestrator::run_watchdog(state, receivers).await
+    let (state, receivers) = core::app_state::AppState::build(config, config_path, profile_name, headless);
+    core::orchestrator::run_watchdog(state, receivers).await
 }

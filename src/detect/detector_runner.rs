@@ -25,7 +25,7 @@ pub fn run_detectors(
 mod tests {
     use std::collections::HashMap;
 
-    use crate::alerts::Severity;
+    use crate::core::alerts::Severity;
     use crate::sources::auditd::{Actor, ParsedEvent};
     use crate::behavior;
     use crate::detect::behavior_adapter::BehaviorDetector;

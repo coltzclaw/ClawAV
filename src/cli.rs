@@ -386,7 +386,7 @@ pub async fn dispatch_subcommand(subcommand: &str, rest_args: &[String], all_arg
                     std::process::exit(1);
                 }
             };
-            if crate::admin::verify_key(&key, &hash) {
+            if crate::core::admin::verify_key(&key, &hash) {
                 std::process::exit(0);
             } else {
                 std::process::exit(1);
@@ -394,11 +394,11 @@ pub async fn dispatch_subcommand(subcommand: &str, rest_args: &[String], all_arg
         }
         "verify-audit" => {
             let path = all_args.get(2).map(|s| s.as_str());
-            crate::audit_chain::run_verify_audit(path)?;
+            crate::core::audit_chain::run_verify_audit(path)?;
             Ok(true)
         }
         "update" => {
-            crate::update::run_update(rest_args)?;
+            crate::core::update::run_update(rest_args)?;
             Ok(true)
         }
         "install" => {
@@ -426,7 +426,7 @@ pub async fn dispatch_subcommand(subcommand: &str, rest_args: &[String], all_arg
         }
         "generate-key" => {
             let hash_path = std::path::Path::new("/etc/clawtower/admin.key.hash");
-            match crate::admin::generate_and_show_admin_key(hash_path) {
+            match crate::core::admin::generate_and_show_admin_key(hash_path) {
                 Ok(true) => Ok(true),   // new key generated
                 Ok(false) => std::process::exit(2), // key already existed
                 Err(e) => {

@@ -13,7 +13,7 @@
 
 use std::collections::HashSet;
 
-use crate::alerts::{Alert, Severity};
+use crate::core::alerts::{Alert, Severity};
 use crate::config::NetPolicyConfig;
 
 #[allow(dead_code)]

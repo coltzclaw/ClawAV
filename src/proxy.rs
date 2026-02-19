@@ -10,7 +10,7 @@
 //! Outbound request bodies are scanned against configurable DLP regex patterns.
 //! Matches can trigger blocking (SSN, AWS keys) or redaction (credit cards).
 
-use crate::alerts::{Alert, Severity};
+use crate::core::alerts::{Alert, Severity};
 use crate::config::PromptFirewallConfig;
 use crate::detect::prompt_firewall::{PromptFirewall, FirewallResult};
 use anyhow::Result;

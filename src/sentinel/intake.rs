@@ -7,7 +7,7 @@
 //! Barnacle pattern matching) and content integrity scanners for prompt injection
 //! markers and encoding attacks (null bytes, homoglyphs).
 
-use crate::alerts::Severity;
+use crate::core::alerts::Severity;
 use crate::detect::barnacle::BarnacleEngine;
 use crate::behavior::check_social_engineering_content;
 

@@ -7,7 +7,7 @@
 //! These include command lists, file paths, and substring patterns organized
 //! by threat category.
 
-use crate::alerts::Severity;
+use crate::core::alerts::Severity;
 
 // ─── Sensitive file paths ───────────────────────────────────────────────────
 

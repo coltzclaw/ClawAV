@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 
 type HmacSha256 = Hmac<Sha256>;
 
-use crate::alerts::Alert;
+use super::alerts::Alert;
 
 const GENESIS_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 
@@ -315,7 +315,7 @@ pub fn run_verify_audit(path: Option<&str>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::alerts::{Alert, Severity};
+    use crate::core::alerts::{Alert, Severity};
     use tempfile::NamedTempFile;
 
     fn test_alert(sev: Severity, source: &str, msg: &str) -> Alert {

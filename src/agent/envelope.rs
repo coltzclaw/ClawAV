@@ -13,7 +13,7 @@
 #![allow(dead_code)]
 
 use crate::agent::profile::CapabilitiesConfig;
-use crate::alerts::Severity;
+use crate::core::alerts::Severity;
 
 /// Result of checking an action against a capability envelope.
 #[derive(Debug, Clone, PartialEq)]
@@ -56,7 +56,7 @@ impl<'a> CapabilityMatcher<'a> {
             return EnvelopeResult::NoEnvelope;
         }
 
-        let basename = crate::util::extract_binary_name(binary);
+        let basename = crate::core::util::extract_binary_name(binary);
 
         if self.capabilities.allowed_binaries.iter().any(|b| b == basename) {
             EnvelopeResult::WithinEnvelope
@@ -106,7 +106,7 @@ impl<'a> CapabilityMatcher<'a> {
             return EnvelopeResult::NoEnvelope;
         }
 
-        let basename = crate::util::extract_binary_name(binary);
+        let basename = crate::core::util::extract_binary_name(binary);
         let is_container_op = matches!(basename, "docker" | "podman" | "nerdctl" | "containerd");
 
         if !is_container_op {
@@ -145,7 +145,7 @@ impl<'a> CapabilityMatcher<'a> {
             return EnvelopeResult::NoEnvelope;
         }
 
-        let basename = crate::util::extract_binary_name(binary);
+        let basename = crate::core::util::extract_binary_name(binary);
         let is_pkg_install = matches!(
             basename,
             "apt" | "apt-get" | "pip" | "pip3" | "npm" | "yarn" | "cargo" | "gem" | "go"
@@ -174,7 +174,7 @@ impl<'a> CapabilityMatcher<'a> {
         }
 
         // Check sudo
-        let basename = crate::util::extract_binary_name(binary);
+        let basename = crate::core::util::extract_binary_name(binary);
         if basename == "sudo" {
             let result = self.check_sudo();
             if matches!(result, EnvelopeResult::Violation { .. }) {

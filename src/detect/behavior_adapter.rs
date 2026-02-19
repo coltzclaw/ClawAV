@@ -75,11 +75,11 @@ impl BehaviorDetector {
         }
     }
 
-    fn severity_to_label(severity: &crate::alerts::Severity) -> &'static str {
+    fn severity_to_label(severity: &crate::core::alerts::Severity) -> &'static str {
         match severity {
-            crate::alerts::Severity::Critical => "critical",
-            crate::alerts::Severity::Warning => "warning",
-            crate::alerts::Severity::Info => "info",
+            crate::core::alerts::Severity::Critical => "critical",
+            crate::core::alerts::Severity::Warning => "warning",
+            crate::core::alerts::Severity::Info => "info",
         }
     }
 

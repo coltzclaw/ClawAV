@@ -61,7 +61,7 @@ pub const RECOMMENDED_AUDIT_RULES: &[&str] = &[
     "-w /home/openclaw/.brownie/accounts/ -p r -k clawtower_crypto_access",
 ];
 
-use crate::alerts::{Alert, Severity};
+use crate::core::alerts::{Alert, Severity};
 use crate::detect::traits::{AlertProposal, DetectionEvent, Detector};
 
 const PARITY_DEDUP_WINDOW_SECS: u64 = 30;
@@ -506,7 +506,7 @@ pub fn check_tamper_event(event: &ParsedEvent) -> Option<Alert> {
         && event.syscall_name == "connect"
     {
         let exe = extract_field(line, "exe").unwrap_or("unknown");
-        let exe_base = crate::util::extract_binary_name(exe);
+        let exe_base = crate::core::util::extract_binary_name(exe);
         const NET_SUSPICIOUS_EXES: &[&str] = &[
             "python3", "python", "node", "nodejs", "perl", "ruby", "php", "lua",
         ];
@@ -558,7 +558,7 @@ pub fn check_tamper_event(event: &ParsedEvent) -> Option<Alert> {
     // Network connect() detection via auditd (T6.1)
     if line.contains("key=\"clawtower_net_connect\"") || line.contains("key=clawtower_net_connect") {
         let exe = extract_field(line, "exe").unwrap_or("unknown");
-        let exe_base = crate::util::extract_binary_name(exe);
+        let exe_base = crate::core::util::extract_binary_name(exe);
         // Skip localhost connections and known-safe processes
         let is_safe = exe.contains("clawtower") || exe.contains("systemd") || exe.contains("dbus");
         if !is_safe {

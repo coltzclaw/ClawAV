@@ -22,9 +22,9 @@ use reqwest::Client;
 use serde::Deserialize;
 use tokio::sync::mpsc;
 
-use crate::alerts::{Alert, Severity};
+use crate::core::alerts::{Alert, Severity};
 use crate::config::Config;
-use crate::response::{
+use crate::core::response::{
     ContainmentAction, PendingAction, PendingStatus, ResponseMode, ResponseRequest,
 };
 use crate::scanner::{ScanResult, ScanStatus};
@@ -63,7 +63,7 @@ pub async fn run_client_tui(config: &Config, config_path: PathBuf) -> Result<()>
 
     // Create the same channels/stores that run_tui() expects
     let (alert_tx, alert_rx) = mpsc::channel::<Alert>(1000);
-    let pending_actions = crate::response::new_shared_pending();
+    let pending_actions = crate::core::response::new_shared_pending();
     let scan_results = crate::scanner::new_shared_scan_results();
     let (response_tx, response_rx) = mpsc::channel::<ResponseRequest>(100);
 
@@ -284,7 +284,7 @@ fn spawn_pending_poller(
     client: Client,
     base_url: String,
     auth_token: String,
-    pending_store: crate::response::SharedPendingActions,
+    pending_store: crate::core::response::SharedPendingActions,
 ) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(2));

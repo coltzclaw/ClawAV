@@ -9,7 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Local};
-use crate::alerts::Alert;
+use crate::core::alerts::Alert;
 
 // ── Config types (moved from config.rs) ──────────────────────────────────────
 
@@ -262,7 +262,7 @@ impl CloudUplink {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::alerts::{Alert, Severity};
+    use crate::core::alerts::{Alert, Severity};
 
     fn test_config() -> CloudConfig {
         CloudConfig {
