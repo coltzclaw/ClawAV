@@ -385,35 +385,24 @@ if [[ "$MODE" == "upgrade" ]]; then
     cp "$TMPDIR/clawsudo" /usr/local/bin/clawsudo
     chmod 755 /usr/local/bin/clawtower /usr/local/bin/clawsudo
 
-    # Detect display server for tray install
+    # Always install/update tray binary (required for secure key delivery)
     CALLING_USER="${SUDO_USER:-$(whoami)}"
     CALLING_HOME=$(eval echo "~$CALLING_USER")
-    DISPLAY_SERVER="headless"
-    if [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
-        DISPLAY_SERVER="wayland"
-    elif su -s /bin/sh "$CALLING_USER" -c 'echo $WAYLAND_DISPLAY' 2>/dev/null | grep -q .; then
-        DISPLAY_SERVER="wayland"
-    elif [[ -n "${DISPLAY:-}" ]]; then
-        DISPLAY_SERVER="x11"
-    fi
-
-    # Always install/update tray binary on systems with a display server
     TRAY_ARTIFACT="clawtower-tray-${ARCH_LABEL}-linux"
-    if [[ "$DISPLAY_SERVER" != "headless" ]]; then
-        log "Installing/updating tray binary ($DISPLAY_SERVER detected)..."
-        if curl -sSL -f -o "$TMPDIR/clawtower-tray" "$BASE_URL/$TRAY_ARTIFACT" 2>/dev/null; then
-            chattr -i /usr/local/bin/clawtower-tray 2>/dev/null || true
-            chmod +x "$TMPDIR/clawtower-tray"
-            cp "$TMPDIR/clawtower-tray" /usr/local/bin/clawtower-tray
-            chmod 755 /usr/local/bin/clawtower-tray
-            chattr +i /usr/local/bin/clawtower-tray
-            log "✓ Tray binary installed"
+    log "Updating tray binary..."
+    if curl -sSL -f -o "$TMPDIR/clawtower-tray" "$BASE_URL/$TRAY_ARTIFACT" 2>/dev/null; then
+        chattr -i /usr/local/bin/clawtower-tray 2>/dev/null || true
+        chmod +x "$TMPDIR/clawtower-tray"
+        cp "$TMPDIR/clawtower-tray" /usr/local/bin/clawtower-tray
+        chmod 755 /usr/local/bin/clawtower-tray
+        chattr +i /usr/local/bin/clawtower-tray
+        log "✓ Tray binary installed"
 
-            # Ensure autostart entry exists
-            AUTOSTART_DIR="$CALLING_HOME/.config/autostart"
-            if [[ ! -f "$AUTOSTART_DIR/clawtower-tray.desktop" ]]; then
-                mkdir -p "$AUTOSTART_DIR"
-                cat > "$AUTOSTART_DIR/clawtower-tray.desktop" <<TRAYEOF
+        # Ensure autostart entry exists
+        AUTOSTART_DIR="$CALLING_HOME/.config/autostart"
+        if [[ ! -f "$AUTOSTART_DIR/clawtower-tray.desktop" ]]; then
+            mkdir -p "$AUTOSTART_DIR"
+            cat > "$AUTOSTART_DIR/clawtower-tray.desktop" <<TRAYEOF
 [Desktop Entry]
 Type=Application
 Name=ClawTower Tray
@@ -422,25 +411,28 @@ Icon=security-high
 Comment=ClawTower security watchdog tray icon
 X-GNOME-Autostart-enabled=true
 TRAYEOF
-                chown "$CALLING_USER:$(id -gn "$CALLING_USER")" "$AUTOSTART_DIR/clawtower-tray.desktop"
-                log "✓ Tray autostart entry created"
-            fi
-        else
-            warn "Tray binary not available in this release — keeping existing"
+            chown "$CALLING_USER:$(id -gn "$CALLING_USER")" "$AUTOSTART_DIR/clawtower-tray.desktop"
+            log "✓ Tray autostart entry created"
         fi
-    elif [[ -f /usr/local/bin/clawtower-tray ]]; then
-        # Headless but tray was previously installed — still update binary
-        log "Updating tray binary (headless, but previously installed)..."
-        if curl -sSL -f -o "$TMPDIR/clawtower-tray" "$BASE_URL/$TRAY_ARTIFACT" 2>/dev/null; then
-            chattr -i /usr/local/bin/clawtower-tray 2>/dev/null || true
-            chmod +x "$TMPDIR/clawtower-tray"
-            cp "$TMPDIR/clawtower-tray" /usr/local/bin/clawtower-tray
-            chmod 755 /usr/local/bin/clawtower-tray
-            chattr +i /usr/local/bin/clawtower-tray
-            log "✓ Tray binary updated"
-        else
-            warn "Tray binary not available in this release — keeping existing"
-        fi
+    else
+        warn "Tray binary not available in this release — keeping existing"
+    fi
+
+    # Install/update D-Bus policy for tray key delivery
+    if [[ -d /etc/dbus-1/system.d ]]; then
+        cat > /etc/dbus-1/system.d/com.clawtower.conf <<'DBUSEOF'
+<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN"
+  "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+<busconfig>
+  <policy user="root">
+    <allow send_interface="com.clawtower.KeyDelivery"/>
+  </policy>
+  <policy context="default">
+    <allow receive_interface="com.clawtower.KeyDelivery"/>
+  </policy>
+</busconfig>
+DBUSEOF
+        log "✓ D-Bus policy updated for key delivery signals"
     fi
 
     # Update BarnacleDefense patterns
@@ -637,7 +629,7 @@ cp "$TMPDIR/clawtower" /usr/local/bin/clawtower
 cp "$TMPDIR/clawsudo" /usr/local/bin/clawsudo
 chmod 755 /usr/local/bin/clawtower /usr/local/bin/clawsudo
 
-# ── Detect display server and install tray binary ─────────────────────────────
+# ── Detect display server ────────────────────────────────────────────────────
 DISPLAY_SERVER="headless"
 CALLING_USER="${SUDO_USER:-$(whoami)}"
 CALLING_HOME=$(eval echo "~$CALLING_USER")
@@ -658,20 +650,32 @@ fi
 
 log "Detected display server: $DISPLAY_SERVER"
 
-if [[ "$DISPLAY_SERVER" != "headless" ]]; then
-    TRAY_ARTIFACT="clawtower-tray-${ARCH_LABEL}-linux"
-    log "Downloading tray binary ($DISPLAY_SERVER detected)..."
-    if curl -sSL -f -o "$TMPDIR/clawtower-tray" "$BASE_URL/$TRAY_ARTIFACT" 2>/dev/null; then
-        chmod +x "$TMPDIR/clawtower-tray"
-        chattr -i /usr/local/bin/clawtower-tray 2>/dev/null || true
-        cp "$TMPDIR/clawtower-tray" /usr/local/bin/clawtower-tray
-        chmod 755 /usr/local/bin/clawtower-tray
-        log "✓ Tray binary installed"
+# ── Always install tray binary ──────────────────────────────────────────────
+# The tray is required for secure admin key delivery (the LLM must never see
+# the OCAV key). Install it regardless of display detection — SSH installs
+# miss the display check, but the machine may have a desktop session.
+TRAY_ARTIFACT="clawtower-tray-${ARCH_LABEL}-linux"
+log "Downloading tray binary..."
+if curl -sSL -f -o "$TMPDIR/clawtower-tray" "$BASE_URL/$TRAY_ARTIFACT" 2>/dev/null; then
+    chmod +x "$TMPDIR/clawtower-tray"
+    chattr -i /usr/local/bin/clawtower-tray 2>/dev/null || true
+    cp "$TMPDIR/clawtower-tray" /usr/local/bin/clawtower-tray
+    chmod 755 /usr/local/bin/clawtower-tray
+    log "✓ Tray binary installed"
 
-        # Create autostart desktop entry
-        AUTOSTART_DIR="$CALLING_HOME/.config/autostart"
-        mkdir -p "$AUTOSTART_DIR"
-        cat > "$AUTOSTART_DIR/clawtower-tray.desktop" <<TRAYEOF
+    # Create autostart desktop entry for the admin user
+    ADMIN_HOME="$CALLING_HOME"
+    # If --admin-user is set and different from caller, also set up for admin
+    if [[ -n "${NI_ADMIN_USER:-}" && "$NI_ADMIN_USER" != "$CALLING_USER" ]]; then
+        ADMIN_HOME=$(eval echo "~$NI_ADMIN_USER" 2>/dev/null || echo "$CALLING_HOME")
+    fi
+
+    for SETUP_HOME in "$CALLING_HOME" "$ADMIN_HOME"; do
+        SETUP_USER=$(stat -c '%U' "$SETUP_HOME" 2>/dev/null || echo "$CALLING_USER")
+        AUTOSTART_DIR="$SETUP_HOME/.config/autostart"
+        if [[ ! -f "$AUTOSTART_DIR/clawtower-tray.desktop" ]]; then
+            mkdir -p "$AUTOSTART_DIR"
+            cat > "$AUTOSTART_DIR/clawtower-tray.desktop" <<TRAYEOF
 [Desktop Entry]
 Type=Application
 Name=ClawTower Tray
@@ -680,17 +684,35 @@ Icon=security-high
 Comment=ClawTower security watchdog tray icon
 X-GNOME-Autostart-enabled=true
 TRAYEOF
-        chown "$CALLING_USER:$(id -gn "$CALLING_USER")" "$AUTOSTART_DIR/clawtower-tray.desktop"
-        log "✓ Tray autostart entry created"
-
-        if [[ "$DISPLAY_SERVER" == "x11" ]]; then
-            warn "X11 detected — tray uses D-Bus StatusNotifierItem. You may need snixembed or similar SNI bridge."
+            chown "$SETUP_USER:$(id -gn "$SETUP_USER" 2>/dev/null || echo "$SETUP_USER")" "$AUTOSTART_DIR/clawtower-tray.desktop" 2>/dev/null || true
+            log "✓ Tray autostart entry created for $SETUP_USER"
         fi
-    else
-        warn "Tray binary not available in this release — skipping (non-fatal)"
+    done
+
+    if [[ "$DISPLAY_SERVER" == "x11" ]]; then
+        warn "X11 detected — tray uses D-Bus StatusNotifierItem. You may need snixembed or similar SNI bridge."
+    elif [[ "$DISPLAY_SERVER" == "headless" ]]; then
+        info "No display detected (SSH session?) — tray binary installed, will activate on desktop login"
     fi
 else
-    log "Headless system — skipping tray binary"
+    warn "Tray binary not available in this release — admin key delivery requires manual retrieval"
+fi
+
+# Install D-Bus policy for tray key delivery signals
+if [[ -d /etc/dbus-1/system.d ]]; then
+    cat > /etc/dbus-1/system.d/com.clawtower.conf <<'DBUSEOF'
+<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN"
+  "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+<busconfig>
+  <policy user="root">
+    <allow send_interface="com.clawtower.KeyDelivery"/>
+  </policy>
+  <policy context="default">
+    <allow receive_interface="com.clawtower.KeyDelivery"/>
+  </policy>
+</busconfig>
+DBUSEOF
+    log "✓ D-Bus policy installed for key delivery signals"
 fi
 
 # Install config (don't overwrite existing)
@@ -1112,6 +1134,45 @@ else
     warn "ClawTower did not start — check: journalctl -u clawtower -n 50"
 fi
 
+# ─── Key delivery helper ─────────────────────────────────────────────────────
+# Writes the admin key to a file readable only by the specified admin user,
+# drops a notification file for the tray binary, and sends a D-Bus signal.
+# Called from both interactive and non-interactive install paths.
+deliver_key_file() {
+    local admin_key="$1"
+    local admin_user="$2"
+
+    KEY_DELIVERY_DIR="/var/lib/clawtower/key-delivery"
+    mkdir -p "$KEY_DELIVERY_DIR"
+    chown "$admin_user" "$KEY_DELIVERY_DIR" 2>/dev/null || true
+    chmod 700 "$KEY_DELIVERY_DIR"
+
+    KEY_FILE="$KEY_DELIVERY_DIR/admin-key-$(date +%Y%m%d%H%M%S).txt"
+    cat > "$KEY_FILE" <<KEYEOF
+ClawTower Admin Key — generated $(date -Iseconds)
+
+  $admin_key
+
+Save this key securely and delete this file.
+This key is required for ClawTower admin socket commands.
+KEYEOF
+    chown "$admin_user" "$KEY_FILE" 2>/dev/null || true
+    chmod 400 "$KEY_FILE"
+
+    # Drop notification file for tray binary (polling fallback)
+    mkdir -p /var/run/clawtower
+    NOTIFY_FILE="/var/run/clawtower/key-notification"
+    echo "$KEY_FILE" > "$NOTIFY_FILE"
+    chmod 600 "$NOTIFY_FILE"
+    chown "$admin_user" "$NOTIFY_FILE" 2>/dev/null || true
+
+    # Send D-Bus signal for instant tray notification
+    dbus-send --system --type=signal \
+        /com/clawtower/KeyDelivery \
+        com.clawtower.KeyDelivery.KeyReady \
+        "string:$KEY_FILE" 2>/dev/null || true
+}
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # PHASE 4: ADMIN KEY
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1120,39 +1181,58 @@ if [[ "$HAD_ADMIN_KEY" == "true" ]]; then
     echo -e "  ${GREEN}✓ Your existing admin key is still valid. No new key was generated.${NC}"
     echo ""
 else
-    phase_bar 4 "Download" "Configure" "Lock Down" "Admin Key"
-    danger_header "Save Your Admin Key" "You will not see it again"
-
-    echo -e "  ${RED}┃${NC} ClawTower generated a new admin key on first startup."
-    echo -e "  ${RED}┃${NC} Check the service logs:"
-    echo -e "  ${RED}┃${NC}"
-    echo -e "  ${RED}┃${NC}   ${BOLD}sudo journalctl -u clawtower -n 50 | grep OCAV-${NC}"
-    echo -e "  ${RED}┃${NC}"
-    echo -e "  ${RED}┃${NC} ${DIM}This key is required for ClawTower's admin socket commands${NC}"
-    echo -e "  ${RED}┃${NC} ${DIM}(pause, resume, config changes via the clawtower CLI).${NC}"
-    echo -e "  ${RED}┃${NC}"
-    echo -e "  ${RED}┃${NC} ${DIM}Your human admin account with sudo can still manage the${NC}"
-    echo -e "  ${RED}┃${NC} ${DIM}service directly (systemctl, chattr, config edits).${NC}"
-    echo -e "  ${RED}┃${NC} ${DIM}The agent account (openclaw) cannot manage ClawTower at all.${NC}"
-    echo ""
-
-    # Show the key right here if we can find it
-    ADMIN_KEY=$(journalctl -u clawtower -n 50 --no-pager 2>/dev/null | grep -oP 'OCAV-[a-f0-9]+' | head -1)
-    if [[ -n "$ADMIN_KEY" ]]; then
-        sep
-        echo ""
-        echo -e "  ${DIM}Your admin key:${NC}"
-        echo ""
-        echo -e "    ${AMBER}${BOLD}$ADMIN_KEY${NC}"
-        echo ""
-        sep
-    fi
-
     if [[ "$NONINTERACTIVE" == true ]]; then
-        echo ""
-        warn "Non-interactive mode — save the admin key shown above before it scrolls away!"
-        echo ""
+        # ── Non-interactive key delivery ────────────────────────────────────
+        # SECURITY: The OCAV admin key must NEVER appear in stdout/stderr
+        # where an AI agent's exec tool could capture it. Deliver it via:
+        #   1. A file readable only by the admin user
+        #   2. A system tray desktop notification (when tray is running)
+        ADMIN_KEY=$(journalctl -u clawtower -n 50 --no-pager 2>/dev/null | grep -oP 'OCAV-[a-f0-9]+' | head -1)
+
+        if [[ -n "$ADMIN_KEY" ]]; then
+            ADMIN_FOR_KEY="${NI_ADMIN_USER:-${EXISTING_ADMINS[0]:-root}}"
+            deliver_key_file "$ADMIN_KEY" "$ADMIN_FOR_KEY"
+
+            log "Admin key written to $KEY_FILE (readable only by $ADMIN_FOR_KEY)"
+            log "Log in as '$ADMIN_FOR_KEY' to retrieve your key, then delete the file"
+        else
+            warn "Could not extract admin key from logs — retrieve manually:"
+            warn "  sudo journalctl -u clawtower -n 50 | grep OCAV-"
+        fi
     else
+        # ── Interactive key display ─────────────────────────────────────────
+        phase_bar 4 "Download" "Configure" "Lock Down" "Admin Key"
+        danger_header "Save Your Admin Key" "You will not see it again"
+
+        echo -e "  ${RED}┃${NC} ClawTower generated a new admin key on first startup."
+        echo -e "  ${RED}┃${NC} Check the service logs:"
+        echo -e "  ${RED}┃${NC}"
+        echo -e "  ${RED}┃${NC}   ${BOLD}sudo journalctl -u clawtower -n 50 | grep OCAV-${NC}"
+        echo -e "  ${RED}┃${NC}"
+        echo -e "  ${RED}┃${NC} ${DIM}This key is required for ClawTower's admin socket commands${NC}"
+        echo -e "  ${RED}┃${NC} ${DIM}(pause, resume, config changes via the clawtower CLI).${NC}"
+        echo -e "  ${RED}┃${NC}"
+        echo -e "  ${RED}┃${NC} ${DIM}Your human admin account with sudo can still manage the${NC}"
+        echo -e "  ${RED}┃${NC} ${DIM}service directly (systemctl, chattr, config edits).${NC}"
+        echo -e "  ${RED}┃${NC} ${DIM}The agent account (openclaw) cannot manage ClawTower at all.${NC}"
+        echo ""
+
+        # Show the key right here if we can find it
+        ADMIN_KEY=$(journalctl -u clawtower -n 50 --no-pager 2>/dev/null | grep -oP 'OCAV-[a-f0-9]+' | head -1)
+        if [[ -n "$ADMIN_KEY" ]]; then
+            sep
+            echo ""
+            echo -e "  ${DIM}Your admin key:${NC}"
+            echo ""
+            echo -e "    ${AMBER}${BOLD}$ADMIN_KEY${NC}"
+            echo ""
+            sep
+
+            # Also save key to file for admin user (interactive mode)
+            ADMIN_FOR_KEY="${NI_ADMIN_USER:-${EXISTING_ADMINS[0]:-$CALLING_USER}}"
+            deliver_key_file "$ADMIN_KEY" "$ADMIN_FOR_KEY"
+        fi
+
         echo ""
         while true; do
             echo -en "  ${RED}▸${NC} Type '${BOLD}I SAVED MY KEY${NC}' to confirm: " > /dev/tty

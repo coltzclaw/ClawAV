@@ -4,6 +4,7 @@
 use ksni::menu::*;
 use reqwest::blocking::Client;
 use serde::Deserialize;
+use std::fs;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -12,6 +13,7 @@ use std::time::Duration;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const POLL_INTERVAL: Duration = Duration::from_secs(10);
 const API_BASE: &str = "http://127.0.0.1:18791";
+const KEY_NOTIFY_PATH: &str = "/var/run/clawtower/key-notification";
 
 #[derive(Debug, Clone, Default)]
 struct TrayState {
@@ -69,6 +71,156 @@ fn run_elevated(args: &[&str]) {
         Err(e) => eprintln!("Failed to launch pkexec: {e}"),
     }
 }
+
+// ─── Desktop notification ────────────────────────────────────────────
+
+/// Show a desktop notification pointing to the admin key file.
+/// Uses notify-send (freedesktop Notifications D-Bus API) with gdbus fallback.
+fn show_notification(key_file_path: &str) {
+    eprintln!("Showing key notification for: {key_file_path}");
+
+    let body = format!(
+        "Your admin key has been saved to:\n{key_file_path}\n\n\
+         Read it, save it securely, then delete the file."
+    );
+
+    // notify-send wraps the freedesktop D-Bus Notifications API
+    if Command::new("notify-send")
+        .args([
+            "--urgency=critical",
+            "--expire-time=0",
+            "--app-name=ClawTower",
+            "--icon=dialog-password",
+            "ClawTower Admin Key Ready",
+            &body,
+        ])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+    {
+        return;
+    }
+
+    // Fallback: gdbus (available on GNOME/GTK systems)
+    if Command::new("gdbus")
+        .args([
+            "call",
+            "--session",
+            "--dest",
+            "org.freedesktop.Notifications",
+            "--object-path",
+            "/org/freedesktop/Notifications",
+            "--method",
+            "org.freedesktop.Notifications.Notify",
+            "ClawTower",
+            "0",
+            "dialog-password",
+            "ClawTower Admin Key Ready",
+            &body,
+            "[]",
+            "{'urgency': <byte 2>}",
+            "0",
+        ])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+    {
+        return;
+    }
+
+    eprintln!("WARNING: Could not show desktop notification");
+    eprintln!("Your admin key is at: {key_file_path}");
+}
+
+// ─── Key notification polling ────────────────────────────────────────
+
+/// Check for a key notification file dropped by the installer.
+/// If found, show the notification and clean up.
+fn check_key_notification() {
+    if let Ok(contents) = fs::read_to_string(KEY_NOTIFY_PATH) {
+        let path = contents.trim();
+        if !path.is_empty() {
+            show_notification(path);
+            let _ = fs::remove_file(KEY_NOTIFY_PATH);
+        }
+    }
+}
+
+// ─── D-Bus signal listener ──────────────────────────────────────────
+
+/// Listen for com.clawtower.KeyDelivery.KeyReady signals on the system bus.
+/// Provides instant key notification when the installer generates a new key.
+/// File polling is the reliable fallback — this is a best-effort bonus.
+fn listen_key_signal() {
+    use dbus::channel::MatchingReceiver;
+
+    let conn = match dbus::blocking::Connection::new_system() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("System bus unavailable ({e}) — file polling handles key notifications");
+            return;
+        }
+    };
+
+    let rule = dbus::message::MatchRule::new_signal("com.clawtower.KeyDelivery", "KeyReady")
+        .static_clone();
+    conn.start_receive(
+        rule,
+        Box::new(|msg, _conn| {
+            if let Some(path) = msg.get1::<&str>() {
+                show_notification(path);
+            }
+            true
+        }),
+    );
+
+    eprintln!("Listening for KeyReady signals on system bus");
+    loop {
+        if let Err(e) = conn.process(Duration::from_secs(1)) {
+            eprintln!("D-Bus error: {e}");
+            thread::sleep(Duration::from_secs(5));
+        }
+    }
+}
+
+// ─── Status polling ─────────────────────────────────────────────────
+
+fn poll_status(client: &Client, state: &Arc<Mutex<TrayState>>) {
+    let health_ok = client
+        .get(format!("{API_BASE}/api/health"))
+        .timeout(Duration::from_secs(5))
+        .send()
+        .map(|r| r.status().is_success())
+        .unwrap_or(false);
+
+    if !health_ok {
+        let mut st = state.lock().unwrap();
+        *st = TrayState::default();
+        return;
+    }
+
+    let status: Option<StatusResponse> = client
+        .get(format!("{API_BASE}/api/status"))
+        .timeout(Duration::from_secs(5))
+        .send()
+        .ok()
+        .and_then(|r| r.json().ok());
+
+    let mut st = state.lock().unwrap();
+    st.running = true;
+    if let Some(s) = status {
+        st.paused = s.paused.unwrap_or(false);
+        st.alerts_critical = s.alerts_critical.unwrap_or(0);
+        st.alerts_warning = s.alerts_warning.unwrap_or(0);
+        st.alerts_total = s.alerts_total.unwrap_or(0);
+        st.last_scan_mins = s.last_scan_epoch.map(|epoch| {
+            let now = chrono::Utc::now().timestamp();
+            ((now - epoch).max(0) / 60) as u64
+        });
+    }
+}
+
+// ─── Tray icon ──────────────────────────────────────────────────────
 
 struct ClawTowerTray {
     state: Arc<Mutex<TrayState>>,
@@ -214,59 +366,41 @@ impl ksni::Tray for ClawTowerTray {
     }
 }
 
-fn poll_status(client: &Client, state: &Arc<Mutex<TrayState>>) {
-    let health_ok = client
-        .get(format!("{API_BASE}/api/health"))
-        .timeout(Duration::from_secs(5))
-        .send()
-        .map(|r| r.status().is_success())
-        .unwrap_or(false);
-
-    if !health_ok {
-        let mut st = state.lock().unwrap();
-        *st = TrayState::default();
-        return;
-    }
-
-    let status: Option<StatusResponse> = client
-        .get(format!("{API_BASE}/api/status"))
-        .timeout(Duration::from_secs(5))
-        .send()
-        .ok()
-        .and_then(|r| r.json().ok());
-
-    let mut st = state.lock().unwrap();
-    st.running = true;
-    if let Some(s) = status {
-        st.paused = s.paused.unwrap_or(false);
-        st.alerts_critical = s.alerts_critical.unwrap_or(0);
-        st.alerts_warning = s.alerts_warning.unwrap_or(0);
-        st.alerts_total = s.alerts_total.unwrap_or(0);
-        st.last_scan_mins = s.last_scan_epoch.map(|epoch| {
-            let now = chrono::Utc::now().timestamp();
-            ((now - epoch).max(0) / 60) as u64
-        });
-    }
-}
+// ─── Main ───────────────────────────────────────────────────────────
 
 fn main() {
     eprintln!("ClawTower Tray v{VERSION} starting...");
 
     let state = Arc::new(Mutex::new(TrayState::default()));
-    let poll_state = Arc::clone(&state);
 
-    // Background poller
+    // 1. D-Bus signal listener — instant key notification from installer
+    thread::spawn(|| {
+        listen_key_signal();
+    });
+
+    // 2. Poller — API status + key notification file check (fallback)
+    let poll_state = Arc::clone(&state);
     thread::spawn(move || {
         let client = Client::new();
+        // Check on startup (key may have been dropped before tray started)
+        check_key_notification();
         loop {
             poll_status(&client, &poll_state);
+            check_key_notification();
             thread::sleep(POLL_INTERVAL);
         }
     });
 
+    // 3. Tray icon — fallback to headless if SNI not supported
     let service = ksni::TrayService::new(ClawTowerTray { state });
-    if let Err(e) = service.run() {
-        eprintln!("TrayService failed: {e}");
-        std::process::exit(1);
+    match service.run() {
+        Ok(()) => {}
+        Err(e) => {
+            eprintln!("Tray icon failed ({e}) — running in headless notification mode");
+            // Keep the process alive for D-Bus listener and file poller
+            loop {
+                thread::sleep(Duration::from_secs(60));
+            }
+        }
     }
 }

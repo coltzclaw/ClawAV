@@ -934,6 +934,9 @@ fi
 sudo rm -rf /var/run/clawtower 2>/dev/null || true
 sudo rm -rf /var/lib/clawtower 2>/dev/null || true
 
+# Remove D-Bus policy file for tray key delivery
+sudo rm -f /etc/dbus-1/system.d/com.clawtower.conf 2>/dev/null || true
+
 # ══════════════════════════════════════════════════════════════════════════════
 # MODULE: System User
 # ══════════════════════════════════════════════════════════════════════════════
