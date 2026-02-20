@@ -206,13 +206,13 @@ impl Aggregator {
 
 /// Spawn the aggregator as a task that reads from `input_rx`,
 /// filters through dedup/rate-limiting, and forwards to `output_tx`.
-/// Also forwards qualifying alerts to `slack_tx`.
+/// Also forwards qualifying alerts to `notify_tx`.
 pub async fn run_aggregator(
     mut input_rx: mpsc::Receiver<Alert>,
     output_tx: mpsc::Sender<Alert>,
-    slack_tx: mpsc::Sender<Alert>,
+    notify_tx: mpsc::Sender<Alert>,
     config: AggregatorConfig,
-    min_slack_severity: super::alerts::Severity,
+    min_notify_severity: super::alerts::Severity,
     api_store: crate::interface::api::SharedAlertStore,
     hmac_secret: Option<String>,
 ) {
@@ -269,9 +269,9 @@ pub async fn run_aggregator(
                 store.push(alert.clone());
             }
 
-            // Forward to Slack if severity meets threshold
-            if alert.severity >= min_slack_severity {
-                let _ = slack_tx.send(alert.clone()).await;
+            // Forward to notification channels if severity meets threshold
+            if alert.severity >= min_notify_severity {
+                let _ = notify_tx.send(alert.clone()).await;
             }
 
             // Forward to TUI/consumers

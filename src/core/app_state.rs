@@ -18,14 +18,16 @@ use crate::config::Config;
 use crate::detect::barnacle;
 use crate::policy::rules as policy;
 use crate::scanner;
-use crate::interface::slack::SlackNotifier;
+use crate::notify::ChannelRegistry;
+use crate::notify::slack::SlackChannel;
+use crate::notify::discord::DiscordChannel;
 
-/// Channel receivers consumed by the aggregator, TUI, and Slack forwarder.
+/// Channel receivers consumed by the aggregator, TUI, and notification forwarder.
 /// These are separated from AppState because each receiver can only be consumed once.
 pub struct AlertReceivers {
     pub raw_rx: mpsc::Receiver<Alert>,
     pub alert_rx: mpsc::Receiver<Alert>,
-    pub slack_rx: mpsc::Receiver<Alert>,
+    pub notify_rx: mpsc::Receiver<Alert>,
 }
 
 /// Centralized application state shared across all spawned tasks.
@@ -38,7 +40,7 @@ pub struct AppState {
     // Channel senders (cloned into spawned tasks)
     pub raw_tx: mpsc::Sender<Alert>,
     pub alert_tx: mpsc::Sender<Alert>,
-    pub slack_tx: mpsc::Sender<Alert>,
+    pub notify_tx: mpsc::Sender<Alert>,
 
     // Shared stores
     pub alert_store: api::SharedAlertStore,
@@ -49,9 +51,9 @@ pub struct AppState {
     pub policy_engine: Option<policy::PolicyEngine>,
     pub barnacle_engine: Option<Arc<barnacle::BarnacleEngine>>,
 
-    // Slack
-    pub notifier: SlackNotifier,
-    pub min_slack_level: Severity,
+    // Notifications
+    pub notifiers: Arc<ChannelRegistry>,
+    pub min_notify_level: Severity,
 }
 
 impl AppState {
@@ -65,10 +67,10 @@ impl AppState {
     ) -> (Self, AlertReceivers) {
         // Three-stage channel pipeline:
         // Sources → raw_tx/raw_rx → Aggregator → alert_tx/alert_rx → TUI
-        //                                      → slack_tx/slack_rx → Slack
+        //                                      → notify_tx/notify_rx → Notifications
         let (raw_tx, raw_rx) = mpsc::channel::<Alert>(1000);
         let (alert_tx, alert_rx) = mpsc::channel::<Alert>(1000);
-        let (slack_tx, slack_rx) = mpsc::channel::<Alert>(100);
+        let (notify_tx, notify_rx) = mpsc::channel::<Alert>(100);
 
         // Load policy engine
         let policy_engine = if config.policy.enabled {
@@ -116,9 +118,15 @@ impl AppState {
         let scan_results = scanner::new_shared_scan_results();
         let pending_actions = response::new_shared_pending();
 
-        // Slack
-        let notifier = SlackNotifier::new(&config.slack);
-        let min_slack_level = Severity::from_str(&config.slack.min_slack_level);
+        // Notifications
+        let mut registry = ChannelRegistry::new();
+        registry.register(Arc::new(SlackChannel::new(&config.slack)));
+        registry.register(Arc::new(DiscordChannel::new(&config.discord)));
+        let notifiers = Arc::new(registry);
+        let min_notify_level = std::cmp::min(
+            Severity::from_str(&config.slack.min_slack_level),
+            Severity::from_str(&config.discord.min_notification_level),
+        );
 
         let state = Self {
             config,
@@ -127,20 +135,20 @@ impl AppState {
             headless,
             raw_tx,
             alert_tx,
-            slack_tx,
+            notify_tx,
             alert_store,
             scan_results,
             pending_actions,
             policy_engine,
             barnacle_engine,
-            notifier,
-            min_slack_level,
+            notifiers,
+            min_notify_level,
         };
 
         let receivers = AlertReceivers {
             raw_rx,
             alert_rx,
-            slack_rx,
+            notify_rx,
         };
 
         (state, receivers)

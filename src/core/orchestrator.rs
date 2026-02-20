@@ -18,7 +18,6 @@ use super::app_state::{AlertReceivers, AppState};
 use super::response::ResponseRequest;
 use super::{admin, aggregator, response, update};
 use crate::approval::{self, ApprovalOrchestrator};
-use crate::interface::slack::SlackNotifier;
 use crate::interface::api;
 use crate::notify::ChannelRegistry;
 use crate::notify::slack::SlackChannel;
@@ -34,7 +33,7 @@ use crate::sources::{auditd, falco, firewall, journald, logtamper, memory_sentin
 /// Slack forwarder, API server, and frontend (TUI or headless). Blocks until
 /// the user quits or a signal is received.
 pub async fn run_watchdog(state: AppState, receivers: AlertReceivers) -> Result<()> {
-    let AlertReceivers { raw_rx, alert_rx, mut slack_rx } = receivers;
+    let AlertReceivers { raw_rx, alert_rx, mut notify_rx } = receivers;
 
     // ── Monitoring sources ──────────────────────────────────────────────────
 
@@ -308,34 +307,61 @@ pub async fn run_watchdog(state: AppState, receivers: AlertReceivers) -> Result<
         }
     });
 
-    // ── Slack ───────────────────────────────────────────────────────────────
+    // ── Notifications ──────────────────────────────────────────────────────
 
-    // Send startup message before moving notifier into forwarder
-    if let Err(e) = state.notifier.send_startup_message().await {
-        eprintln!("Slack startup message failed: {}", e);
+    // Send startup notification to all available channels
+    {
+        let startup_notif = crate::notify::Notification::new(
+            Severity::Info,
+            "ClawTower watchdog started".to_string(),
+            "Independent monitoring active".to_string(),
+            "system".to_string(),
+        );
+        for ch in state.notifiers.available() {
+            if let Err(e) = ch.send_notification(&startup_notif).await {
+                eprintln!("{} startup message failed: {}", ch.name(), e);
+            }
+        }
     }
 
     // Periodic heartbeat
     let heartbeat_interval = state.config.slack.heartbeat_interval;
     if heartbeat_interval > 0 {
-        let heartbeat_notifier = SlackNotifier::new(&state.config.slack);
+        let notifiers = state.notifiers.clone();
         let start = std::time::Instant::now();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(heartbeat_interval));
             interval.tick().await; // skip first
             loop {
                 interval.tick().await;
-                let _ = heartbeat_notifier.send_heartbeat(start.elapsed().as_secs(), 0).await;
+                let elapsed = start.elapsed().as_secs();
+                let notif = crate::notify::Notification::new(
+                    Severity::Info,
+                    "ClawTower heartbeat".to_string(),
+                    format!("Uptime: {}h {}m", elapsed / 3600, (elapsed % 3600) / 60),
+                    "system".to_string(),
+                );
+                for ch in notifiers.available() {
+                    let _ = ch.send_notification(&notif).await;
+                }
             }
         });
     }
 
-    // Slack forwarder (consumes notifier)
-    let notifier = state.notifier;
+    // Notification forwarder (fans out alerts to all available channels)
+    let forwarder_notifiers = state.notifiers.clone();
     tokio::spawn(async move {
-        while let Some(alert) = slack_rx.recv().await {
-            if let Err(e) = notifier.send_alert(&alert).await {
-                eprintln!("Slack send error: {}", e);
+        while let Some(alert) = notify_rx.recv().await {
+            let notif = crate::notify::Notification::new(
+                alert.severity.clone(),
+                format!("{} ClawTower Alert", alert.severity.emoji()),
+                alert.message.clone(),
+                alert.source.clone(),
+            );
+            for ch in forwarder_notifiers.available() {
+                if let Err(e) = ch.send_notification(&notif).await {
+                    eprintln!("{} send error: {}", ch.name(), e);
+                }
             }
         }
     });
@@ -374,16 +400,16 @@ pub async fn run_watchdog(state: AppState, receivers: AlertReceivers) -> Result<
     } else {
         AggregatorConfig::default()
     };
-    let min_slack = state.min_slack_level;
+    let min_notify = state.min_notify_level;
     let agg_store = state.alert_store.clone();
     let agg_alert_tx = state.alert_tx.clone();
-    let agg_slack_tx = state.slack_tx.clone();
+    let agg_notify_tx = state.notify_tx.clone();
     let chain_hmac_secret = std::fs::read_to_string("/etc/machine-id")
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
     tokio::spawn(async move {
-        aggregator::run_aggregator(raw_rx, agg_alert_tx, agg_slack_tx, agg_config, min_slack, agg_store, chain_hmac_secret).await;
+        aggregator::run_aggregator(raw_rx, agg_alert_tx, agg_notify_tx, agg_config, min_notify, agg_store, chain_hmac_secret).await;
     });
 
     // ── Response engine ─────────────────────────────────────────────────────
